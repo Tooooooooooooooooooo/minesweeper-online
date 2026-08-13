@@ -1,0 +1,2321 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=no">
+<title>联机扫雷 - Minesweeper Online</title>
+<!--
+  Multiplayer transport: EMQX public MQTT broker (broker.emqx.io) via
+  WebSocket, with an inline minimal MQTT 3.1.1 client (QoS0).
+  History: PeerJS public cloud was abandoned (geo-blocks mainland China);
+  ntfy.sh relay was abandoned (free tier enforces a daily per-IP message
+  quota -> HTTP 429 "daily message quota reached" during active play).
+  EMQX public broker has no such quota and is reachable from CN.
+-->
+<style>
+* { margin: 0; padding: 0; box-sizing: border-box; -webkit-tap-highlight-color: transparent; }
+html, body { width: 100%; height: 100%; overflow: hidden; }
+body {
+  background: #c0c0c0;
+  font-family: 'Segoe UI', Tahoma, sans-serif;
+  display: flex; flex-direction: column;
+  user-select: none; -webkit-user-select: none;
+}
+
+/* ---- Menu Bar ---- */
+#menuBar {
+  display: flex; align-items: center; gap: 6px;
+  padding: 4px 8px; background: #c0c0c0;
+  border-bottom: 1px solid #808080;
+  flex-shrink: 0; flex-wrap: wrap;
+}
+#menuBar select, #menuBar button {
+  font-size: 13px; padding: 3px 10px;
+  background: #c0c0c0; border: 2px solid;
+  border-color: #fff #808080 #808080 #fff;
+  cursor: pointer; outline: none;
+}
+#menuBar select:hover, #menuBar button:hover { background: #d0d0d0; }
+#menuBar select:disabled { color: #999; cursor: not-allowed; }
+#menuBar select:disabled:hover { background: #c0c0c0; }
+#menuBar select:active, #menuBar button:active {
+  border-color: #808080 #fff #fff #808080;
+}
+#menuBar .spacer { flex: 1; }
+#menuBar label { font-size: 12px; color: #333; }
+#menuBar button.active { background: #000080; color: #fff; }
+#menuBar button.active:hover { background: #0000a0; }
+
+/* ---- Multiplayer Panel ---- */
+#mpPanel {
+  display: flex; align-items: center; gap: 6px; flex-wrap: wrap;
+  padding: 4px 8px; background: #c0c0c0;
+  border-bottom: 1px solid #808080; flex-shrink: 0;
+}
+#mpPanel input {
+  font-size: 13px; padding: 3px 8px; width: 100px;
+  border: 2px solid; border-color: #808080 #fff #fff #808080;
+  background: #fff; outline: none;
+}
+#mpPanel button {
+  font-size: 13px; padding: 3px 10px; background: #c0c0c0;
+  border: 2px solid; border-color: #fff #808080 #808080 #fff;
+  cursor: pointer; outline: none;
+}
+#mpPanel button:hover { background: #d0d0d0; }
+#mpPanel button:active { border-color: #808080 #fff #fff #808080; }
+#mpPanel button:disabled { color: #999; cursor: default; }
+#mpPanel .status { font-size: 12px; color: #333; margin-left: 4px; }
+#roomCode { font-weight: bold; color: #005; }
+#onlineCount { font-weight: bold; color: #060; }
+/* Per-player sweep stats for the current round */
+#statsBar {
+  background: #d8d8d8; padding: 2px 8px;
+  border: 1px solid; border-color: #fff #808080 #808080 #fff;
+  font-size: 12px; color: #202020;
+}
+
+/* ---- Game Container ---- */
+#gameWrap {
+  flex: 1; display: flex; align-items: center; justify-content: center;
+  overflow: auto; padding: 8px; position: relative;
+}
+#gameArea {
+  display: inline-block; background: #c0c0c0;
+  padding: 6px; border: 3px solid;
+  border-color: #fff #808080 #808080 #fff;
+}
+
+/* ---- Header (mine count / smiley / timer) ---- */
+#header {
+  display: flex; align-items: center; justify-content: space-between;
+  padding: 4px 6px; margin-bottom: 6px;
+  border: 2px solid; border-color: #808080 #fff #fff #808080;
+}
+.digit-display {
+  font-family: 'Courier New', monospace; font-weight: bold;
+  font-size: 28px; line-height: 1; letter-spacing: 2px;
+  color: #f00; background: #000; padding: 2px 5px;
+  border: 1px solid; border-color: #808080 #fff #fff #808080;
+  min-width: 56px; text-align: center;
+}
+#smiley {
+  font-size: 24px; width: 36px; height: 36px;
+  background: #c0c0c0; border: 2px solid;
+  border-color: #fff #808080 #808080 #fff;
+  cursor: pointer; outline: none; line-height: 36px; text-align: center;
+}
+#smiley:active { border-color: #808080 #fff #fff #808080; }
+
+/* ---- Minefield Grid ---- */
+#minefield {
+  display: grid; border: 3px solid;
+  border-color: #808080 #fff #fff #808080;
+}
+.cell {
+  width: 26px; height: 26px;
+  display: flex; align-items: center; justify-content: center;
+  font-weight: bold; font-size: 16px; cursor: pointer;
+  background: #c0c0c0; border: 2px solid;
+  border-color: #fff #808080 #808080 #fff;
+  position: relative;
+}
+.cell:hover { background: #d0d0d0; }
+.cell.revealed {
+  border: 1px solid #808080; background: #c0c0c0; cursor: default;
+}
+.cell.revealed:hover { background: #c0c0c0; }
+.cell.flag::before { content: '\2691'; color: #f00; font-size: 18px; }
+.cell.mine { background: #f00; }
+.cell.mine::before { content: '\2738'; color: #000; font-size: 16px; }
+.cell.mine.exploded { background: #f80; }
+.cell.wrong-flag::before { content: '\2718'; color: #000; }
+.cell.num1 { color: #0000ff; }
+.cell.num2 { color: #008000; }
+.cell.num3 { color: #ff0000; }
+.cell.num4 { color: #000080; }
+.cell.num5 { color: #800000; }
+.cell.num6 { color: #008080; }
+.cell.num7 { color: #000000; }
+.cell.num8 { color: #808080; }
+/* Flash hint for unfulfilled right-click chord — instant on/off, no easing.
+   !important so it also wins over the inline per-player tint. */
+.cell.flash { background-color: #ffe066 !important; }
+/* Hidden hint indicators (cheat) */
+.cell.cheat-mine::after, .cell.cheat-safe::after {
+  content: ''; position: absolute; right: 2px; bottom: 2px;
+  width: 5px; height: 5px; border-radius: 50%; pointer-events: none;
+}
+.cell.cheat-mine::after { background: #d00; }
+.cell.cheat-safe::after { background: #0a0; }
+/* Toast for hidden feature activation */
+#cheatToast {
+  position: fixed; right: 12px; bottom: 12px; z-index: 99;
+  background: rgba(0,0,0,0.72); color: #fff; font-size: 12px;
+  padding: 5px 10px; border-radius: 4px; opacity: 0;
+  pointer-events: none; transition: opacity 0.3s;
+}
+#cheatToast.show { opacity: 1; }
+
+/* ---- Game Over Overlay ---- */
+#overlay {
+  position: absolute; top: 0; left: 0; width: 100%; height: 100%;
+  display: none; align-items: center; justify-content: center;
+  background: rgba(0,0,0,0.3); z-index: 10;
+}
+#overlay.show { display: flex; animation: fadeIn 0.3s; }
+@keyframes fadeIn { from { opacity: 0; } to { opacity: 1; } }
+#overlay .msg {
+  font-size: 36px; font-weight: bold; padding: 20px 50px;
+  border: 4px solid; background: #c0c0c0; text-align: center;
+  animation: bounce 0.5s ease;
+}
+@keyframes bounce {
+  0% { transform: scale(0.5); opacity: 0; }
+  60% { transform: scale(1.1); }
+  100% { transform: scale(1); opacity: 1; }
+}
+#overlay .msg.win { color: #008000; border-color: #008000 #fff #fff #008000; }
+#overlay .msg.lose { color: #f00; border-color: #f00 #fff #fff #f00; }
+
+/* ---- Windows-style Modal ---- */
+.modal-mask {
+  position: fixed; inset: 0; z-index: 50;
+  background: rgba(0,0,0,0.35);
+  display: none; align-items: center; justify-content: center;
+}
+.modal-mask.show { display: flex; }
+.modal-win {
+  width: min(560px, 94vw); max-height: 84vh;
+  background: #c0c0c0; border: 3px solid;
+  border-color: #fff #808080 #808080 #fff;
+  box-shadow: 4px 4px 12px rgba(0,0,0,0.4);
+  display: flex; flex-direction: column;
+  font-size: 13px; color: #000;
+}
+.modal-titlebar {
+  display: flex; align-items: center; gap: 6px;
+  padding: 5px 8px; background: #000080; color: #fff;
+  font-weight: bold; font-size: 13px;
+}
+.modal-titlebar .spacer { flex: 1; }
+.modal-close {
+  width: 20px; height: 20px; line-height: 18px; text-align: center;
+  background: #c0c0c0; color: #000; font-weight: bold; cursor: pointer;
+  border: 2px solid; border-color: #fff #808080 #808080 #fff;
+}
+.modal-close:active { border-color: #808080 #fff #fff #808080; }
+.modal-body { padding: 10px 12px; overflow-y: auto; }
+.modal-body label { display: inline-block; min-width: 64px; }
+.modal-body input[type=text], .modal-body input[type=password] {
+  font-size: 13px; padding: 3px 6px; margin: 3px 0;
+  border: 2px solid; border-color: #808080 #fff #fff #808080;
+  background: #fff; outline: none;
+}
+.modal-btns { display: flex; gap: 8px; justify-content: flex-end; padding: 8px 12px; }
+.modal-btns button, .modal-body button {
+  font-size: 13px; padding: 4px 14px; background: #c0c0c0;
+  border: 2px solid; border-color: #fff #808080 #808080 #fff;
+  cursor: pointer; outline: none;
+}
+.modal-btns button:active, .modal-body button:active { border-color: #808080 #fff #fff #808080; }
+.modal-body button:hover, .modal-btns button:hover { background: #d0d0d0; }
+.modal-row { display: flex; align-items: center; gap: 8px; margin: 4px 0; flex-wrap: wrap; }
+.modal-hint { font-size: 11px; color: #444; margin-top: 6px; }
+.modal-tabs { display: flex; gap: 4px; margin-bottom: 8px; }
+.modal-tabs button {
+  padding: 3px 12px; font-size: 12px; border: 2px solid;
+  border-color: #fff #808080 #808080 #fff; background: #c0c0c0; cursor: pointer;
+}
+.modal-tabs button.active { border-color: #808080 #fff #fff #808080; background: #d8d8d8; font-weight: bold; }
+
+/* ---- Room list ---- */
+.room-item {
+  display: flex; align-items: center; gap: 8px;
+  padding: 6px 8px; margin-bottom: 6px;
+  border: 2px solid; border-color: #fff #808080 #808080 #fff;
+  background: #d8d8d8; cursor: pointer;
+}
+.room-item:hover { background: #e8e8e8; }
+.room-item .code { font-weight: bold; font-family: 'Courier New', monospace; min-width: 64px; }
+.room-item .name { flex: 1; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.room-item .meta { font-size: 11px; color: #444; }
+.room-item .lock { color: #a00; font-size: 12px; }
+.room-empty { color: #555; text-align: center; padding: 18px 0; font-size: 12px; }
+
+/* ---- Chat panel ---- */
+#chatPanel {
+  position: fixed; right: 8px; bottom: 8px; z-index: 40;
+  width: min(300px, 92vw); height: 260px;
+  background: #c0c0c0; border: 3px solid;
+  border-color: #fff #808080 #808080 #fff;
+  display: none; flex-direction: column;
+  box-shadow: 3px 3px 10px rgba(0,0,0,0.35);
+}
+#chatPanel.show { display: flex; }
+#chatPanel .titlebar {
+  display: flex; align-items: center; padding: 4px 8px;
+  background: #000080; color: #fff; font-weight: bold; font-size: 12px; gap: 6px;
+}
+#chatPanel .titlebar .spacer { flex: 1; }
+#chatMsgs {
+  flex: 1; overflow-y: auto; padding: 6px 8px; font-size: 12px;
+  background: #fdfdfd; border: 2px solid;
+  border-color: #808080 #fff #fff #808080; margin: 5px 6px;
+}
+.chat-line { margin: 2px 0; word-break: break-all; line-height: 1.4; }
+.chat-line .who { font-weight: bold; }
+.chat-line .time { color: #888; font-size: 10px; margin-right: 4px; }
+.chat-line.sys { color: #666; font-style: italic; }
+#chatInputRow { display: flex; gap: 6px; padding: 0 6px 6px; }
+#chatInputRow input {
+  flex: 1; font-size: 12px; padding: 3px 6px;
+  border: 2px solid; border-color: #808080 #fff #fff #808080;
+  background: #fff; outline: none;
+}
+#chatInputRow button {
+  font-size: 12px; padding: 3px 10px; background: #c0c0c0;
+  border: 2px solid; border-color: #fff #808080 #808080 #fff; cursor: pointer;
+}
+#chatToggleBtn { position: relative; }
+#chatUnread {
+  position: absolute; top: -6px; right: -6px; min-width: 15px; height: 15px;
+  background: #f00; color: #fff; font-size: 10px; line-height: 15px;
+  border-radius: 8px; padding: 0 3px; display: none; text-align: center;
+}
+#chatUnread.show { display: block; }
+
+/* ---- Leaderboard ---- */
+.lb-table { width: 100%; border-collapse: collapse; font-size: 12px; }
+.lb-table th, .lb-table td {
+  border: 1px solid #808080; padding: 3px 6px; text-align: left;
+}
+.lb-table th { background: #d8d8d8; }
+.lb-table tr:nth-child(even) td { background: #ececec; }
+.lb-rank1 { color: #c80; font-weight: bold; }
+.lb-rank2 { color: #888; font-weight: bold; }
+.lb-rank3 { color: #a55; font-weight: bold; }
+
+/* ---- Responsive ---- */
+@media (max-width: 600px) {
+  .cell { width: 22px; height: 22px; font-size: 14px; }
+  .digit-display { font-size: 22px; min-width: 48px; }
+  #smiley { width: 32px; height: 32px; font-size: 20px; }
+}
+@media (max-width: 400px) {
+  .cell { width: 18px; height: 18px; font-size: 12px; }
+  #menuBar select, #menuBar button, #mpPanel button, #mpPanel input { font-size: 11px; }
+}
+</style>
+</head>
+<body>
+
+<!-- Menu Bar -->
+<div id="menuBar">
+  <label>难度:</label>
+  <select id="difficulty">
+    <option value="easy">初级 9×9 / 10雷</option>
+    <option value="medium">中级 16×16 / 40雷</option>
+    <option value="hard">高级 30×16 / 99雷</option>
+    <option value="fullscreen">满屏模式</option>
+  </select>
+  <button id="newGameBtn">新游戏</button>
+  <button id="colorModeBtn" title="按玩家显示不同的扫雷颜色，再次点击恢复默认">分色</button>
+  <button id="roomListBtn" title="查看公开房间列表">房间列表</button>
+  <button id="leaderboardBtn" title="查看排行榜">排行榜</button>
+  <button id="chatToggleBtn" title="聊天">聊天<span id="chatUnread"></span></button>
+  <div class="spacer"></div>
+  <button id="fullscreenBtn">全屏</button>
+</div>
+
+<!-- Multiplayer Panel -->
+<div id="mpPanel">
+  <input id="nickInput" placeholder="昵称" maxlength="12" value="玩家">
+  <button id="createRoomBtn">创建房间</button>
+  <button id="inviteBtn" disabled title="复制邀请链接，好友打开浏览器即可直接进入房间">邀请好友</button>
+  <input id="joinInput" placeholder="房间名" maxlength="20">
+  <button id="joinRoomBtn">加入房间</button>
+  <button id="leaveRoomBtn" disabled>离开房间</button>
+  <span class="status">状态: <span id="mpStatus">未连接</span></span>
+  <span class="status">房间: <span id="roomCode">-</span></span>
+  <span class="status">在线: <span id="onlineCount">1</span>人</span>
+  <span class="status" id="statsBar" style="display:none;"></span>
+</div>
+
+<!-- Game Area -->
+<div id="gameWrap">
+  <div id="gameArea">
+    <div id="header">
+      <div class="digit-display" id="mineCount">010</div>
+      <button id="smiley">&#128578;</button>
+      <div class="digit-display" id="timer">000</div>
+    </div>
+    <div id="minefield"></div>
+  </div>
+  <div id="overlay"><div class="msg" id="overlayMsg"></div></div>
+</div>
+<div id="cheatToast"></div>
+
+<!-- Chat Panel -->
+<div id="chatPanel">
+  <div class="titlebar">
+    <span>房间聊天</span>
+    <div class="spacer"></div>
+    <span id="chatRoomLabel" style="font-weight:normal;font-size:11px;">未连接</span>
+    <span class="modal-close" id="chatCloseBtn">✕</span>
+  </div>
+  <div id="chatMsgs"></div>
+  <div id="chatInputRow">
+    <input id="chatInput" placeholder="输入消息..." maxlength="200">
+    <button id="chatSendBtn">发送</button>
+  </div>
+</div>
+
+<!-- Modal: Create Room -->
+<div class="modal-mask" id="createModal">
+  <div class="modal-win">
+    <div class="modal-titlebar"><span>创建房间</span><div class="spacer"></div><span class="modal-close" data-close="createModal">✕</span></div>
+    <div class="modal-body">
+      <div class="modal-row"><label>房间名:</label><input type="text" id="createRoomName" maxlength="20" placeholder="例如：欢乐扫雷" style="flex:1;min-width:180px;"></div>
+      <div class="modal-hint">对方输入此房间名即可加入，请取一个好记的名字</div>
+      <div class="modal-row"><label>密码:</label><input type="password" id="createRoomPass" maxlength="12" placeholder="留空 = 公开房间"><span class="modal-hint">设置密码后，他人需密码才能加入</span></div>
+    </div>
+    <div class="modal-btns">
+      <button id="createRoomOk">创建</button>
+      <button data-close="createModal">取消</button>
+    </div>
+  </div>
+</div>
+
+<!-- Modal: Join with password -->
+<div class="modal-mask" id="passModal">
+  <div class="modal-win" style="width:min(380px,92vw);">
+    <div class="modal-titlebar"><span>加入加密房间</span><div class="spacer"></div><span class="modal-close" data-close="passModal">✕</span></div>
+    <div class="modal-body">
+      <div class="modal-row">房间「<b id="passRoomCode">-</b>」需要密码</div>
+      <div class="modal-row"><label>密码:</label><input type="password" id="joinRoomPass" maxlength="12" style="flex:1;"></div>
+    </div>
+    <div class="modal-btns">
+      <button id="passOk">加入</button>
+      <button data-close="passModal">取消</button>
+    </div>
+  </div>
+</div>
+
+<!-- Modal: Room List -->
+<div class="modal-mask" id="roomListModal">
+  <div class="modal-win">
+    <div class="modal-titlebar"><span>公开房间列表</span><div class="spacer"></div><span class="modal-close" data-close="roomListModal">✕</span></div>
+    <div class="modal-body">
+      <div class="modal-row" style="justify-content:space-between;">
+        <span class="modal-hint" style="margin:0;" id="roomListHint">正在从大厅获取房间...</span>
+        <button id="refreshRoomsBtn" style="font-size:12px;padding:2px 10px;">刷新</button>
+      </div>
+      <div id="roomListBox" style="margin-top:6px;"></div>
+    </div>
+    <div class="modal-btns"><button data-close="roomListModal">关闭</button></div>
+  </div>
+</div>
+
+<!-- Modal: Leaderboard -->
+<div class="modal-mask" id="lbModal">
+  <div class="modal-win">
+    <div class="modal-titlebar"><span>排行榜</span><div class="spacer"></div><span class="modal-close" data-close="lbModal">✕</span></div>
+    <div class="modal-body">
+      <div class="modal-tabs">
+        <button id="lbTabLocal" class="active">本机</button>
+        <button id="lbTabNet">全网(近12h)</button>
+      </div>
+      <div id="lbBox"></div>
+      <div class="modal-hint" id="lbHint">胜利后自动记录成绩</div>
+    </div>
+    <div class="modal-btns"><button data-close="lbModal">关闭</button></div>
+  </div>
+</div>
+
+<script>
+// ============================================================
+//  联机扫雷 - Minesweeper Online
+//  联机传输: EMQX 公共 MQTT broker (WSS, 房间 topic 订阅/发布)
+// ============================================================
+
+'use strict';
+
+// ---- Global State ----
+let CFG = { rows: 9, cols: 9, mines: 10 };
+let board = [];        // {mine, revealed, flagged, adj}
+let gameOver = false;
+let gameWon = false;
+let firstClick = true;
+let flagCount = 0;
+let revealedCount = 0;
+let timerInterval = null;
+let elapsed = 0;
+let isHost = false;
+let isFullscreen = false;
+let minesPlaced = false;
+let localSwept = 0; // solo (no room): cells revealed by this player this round
+let colorMode = false; // per-player coloring toggle (local view option)
+// Tint palette for per-player swept cells (light pastels keep numbers readable)
+const PLAYER_COLORS = ['#9fc7ff', '#a5e8a5', '#ffe08a', '#ffb3b3', '#d6b8ff', '#a8e6e6', '#ffc4a3', '#d2e8a0'];
+
+// ---- DOM Refs ----
+const $ = id => document.getElementById(id);
+const minefieldEl = $('minefield');
+const mineCountEl = $('mineCount');
+const timerEl = $('timer');
+const smileyEl = $('smiley');
+const overlayEl = $('overlay');
+const overlayMsgEl = $('overlayMsg');
+
+// ============================================================
+//  Part 1: Game Logic
+// ============================================================
+
+function initBoard(rows, cols, mines) {
+  CFG = { rows, cols, mines };
+  board = [];
+  for (let r = 0; r < rows; r++) {
+    const row = [];
+    for (let c = 0; c < cols; c++) {
+      row.push({ mine: false, revealed: false, flagged: false, adj: 0, exploded: false, wrongFlag: false, owner: null });
+    }
+    board.push(row);
+  }
+  gameOver = false; gameWon = false; firstClick = true;
+  flagCount = 0; revealedCount = 0; elapsed = 0;
+  minesPlaced = false;
+  localSwept = 0;
+  // New round: reset every player's sweep counter (host keeps authority)
+  if (typeof mp !== 'undefined' && mp.players) {
+    mp.players.forEach(p => { if (p && p.swept !== undefined) p.swept = 0; });
+  }
+  renderStats();
+  stopTimer(); updateMineCount(); updateTimer();
+  smileyEl.innerHTML = '&#128578;';
+  hideOverlay();
+}
+
+function placeMines(safeR, safeC) {
+  const { rows, cols, mines } = CFG;
+  let placed = 0;
+  const safe = new Set();
+  // safe zone: the clicked cell + neighbors
+  for (let dr = -1; dr <= 1; dr++)
+    for (let dc = -1; dc <= 1; dc++) {
+      const r = safeR + dr, c = safeC + dc;
+      if (r >= 0 && r < rows && c >= 0 && c < cols) safe.add(r * cols + c);
+    }
+  while (placed < mines) {
+    const idx = Math.floor(Math.random() * rows * cols);
+    if (safe.has(idx)) continue;
+    const r = Math.floor(idx / cols), c = idx % cols;
+    if (board[r][c].mine) continue;
+    board[r][c].mine = true; placed++;
+  }
+  // calc adjacent
+  for (let r = 0; r < rows; r++)
+    for (let c = 0; c < cols; c++) {
+      if (board[r][c].mine) continue;
+      let cnt = 0;
+      for (let dr = -1; dr <= 1; dr++)
+        for (let dc = -1; dc <= 1; dc++) {
+          if (!dr && !dc) continue;
+          const nr = r + dr, nc = c + dc;
+          if (nr >= 0 && nr < rows && nc >= 0 && nc < cols && board[nr][nc].mine) cnt++;
+        }
+      board[r][c].adj = cnt;
+    }
+  minesPlaced = true;
+}
+
+function revealCell(r, c, owner) {
+  if (gameOver) return;
+  const { rows, cols } = CFG;
+  const cell = board[r][c];
+  if (cell.revealed || cell.flagged) return;
+
+  if (firstClick) {
+    firstClick = false;
+    if (!minesPlaced) placeMines(r, c);
+    startTimer();
+  }
+
+  cell.revealed = true;
+  cell.owner = owner || 'local'; // who swept this cell (player id | local)
+  revealedCount++;
+
+  if (cell.mine) {
+    cell.exploded = true;
+    endGame(false);
+    return;
+  }
+
+  if (cell.adj === 0) {
+    for (let dr = -1; dr <= 1; dr++)
+      for (let dc = -1; dc <= 1; dc++) {
+        if (!dr && !dc) continue;
+        const nr = r + dr, nc = c + dc;
+        if (nr >= 0 && nr < rows && nc >= 0 && nc < cols) {
+          revealCell(nr, nc, owner);
+        }
+      }
+  }
+
+  if (revealedCount === rows * cols - CFG.mines) endGame(true);
+}
+
+function toggleFlag(r, c) {
+  if (gameOver) return;
+  const cell = board[r][c];
+  if (cell.revealed) return;
+  cell.flagged = !cell.flagged;
+  flagCount += cell.flagged ? 1 : -1;
+  updateMineCount();
+  renderCell(r, c, true);
+}
+
+function chord(r, c, owner) {
+  if (gameOver) return;
+  const { rows, cols } = CFG;
+  const cell = board[r][c];
+  if (!cell.revealed || cell.adj === 0) return;
+  let flagAdj = 0;
+  const toReveal = [];
+  for (let dr = -1; dr <= 1; dr++)
+    for (let dc = -1; dc <= 1; dc++) {
+      if (!dr && !dc) continue;
+      const nr = r + dr, nc = c + dc;
+      if (nr >= 0 && nr < rows && nc >= 0 && nc < cols) {
+        if (board[nr][nc].flagged) flagAdj++;
+        else if (!board[nr][nc].revealed) toReveal.push([nr, nc]);
+      }
+    }
+  if (flagAdj === cell.adj) {
+    toReveal.forEach(([nr, nc]) => revealCell(nr, nc, owner));
+  }
+}
+
+// Right-click on a revealed number: if surrounding flags match the number,
+// auto-open the remaining neighbors (same as chord); otherwise flash the
+// unrevealed neighbors as a hint. Returns true when a chord was performed.
+function chordOrFlash(r, c, owner) {
+  if (gameOver) return false;
+  const { rows, cols } = CFG;
+  const cell = board[r][c];
+  if (!cell.revealed || cell.adj === 0) return false;
+  let flagAdj = 0;
+  const toReveal = [];
+  for (let dr = -1; dr <= 1; dr++)
+    for (let dc = -1; dc <= 1; dc++) {
+      if (!dr && !dc) continue;
+      const nr = r + dr, nc = c + dc;
+      if (nr >= 0 && nr < rows && nc >= 0 && nc < cols) {
+        if (board[nr][nc].flagged) flagAdj++;
+        else if (!board[nr][nc].revealed) toReveal.push([nr, nc]);
+      }
+    }
+  if (flagAdj === cell.adj) {
+    toReveal.forEach(([nr, nc]) => revealCell(nr, nc, owner));
+    return true;
+  }
+  // Not fully flagged -> flash the still-unrevealed part (fallback: the number itself)
+  flashCells(toReveal.length ? toReveal : [[r, c]]);
+  return false;
+}
+
+function flashCells(cells) {
+  cells.forEach(([r, c]) => {
+    const idx = r * CFG.cols + c;
+    const el = minefieldEl.children[idx];
+    if (!el) return;
+    // Instant on/off toggle — no easing, no CSS animation
+    let count = 0;
+    const tick = () => {
+      if (count % 2 === 0) el.classList.add('flash');
+      else el.classList.remove('flash');
+      count++;
+      if (count < 4) setTimeout(tick, 120);
+      else el.classList.remove('flash');
+    };
+    tick();
+  });
+}
+
+function endGame(won) {
+  gameOver = true; gameWon = won;
+  stopTimer();
+  const { rows, cols } = CFG;
+  if (won) {
+    smileyEl.innerHTML = '&#128526;';
+    // flag remaining mines
+    for (let r = 0; r < rows; r++)
+      for (let c = 0; c < cols; c++)
+        if (board[r][c].mine && !board[r][c].flagged) {
+          board[r][c].flagged = true; flagCount++;
+        }
+    updateMineCount();
+    showOverlay('胜利!', true);
+    // Record score: single-player (no room) or host (authoritative in room)
+    if (!mp.connected || mp.isHost) recordScore(myName, elapsed, difficultyLabel());
+  } else {
+    smileyEl.innerHTML = '&#128565;';
+    // reveal all mines
+    for (let r = 0; r < rows; r++)
+      for (let c = 0; c < cols; c++) {
+        if (board[r][c].mine && !board[r][c].flagged) board[r][c].revealed = true;
+        if (!board[r][c].mine && board[r][c].flagged) board[r][c].wrongFlag = true;
+      }
+    showOverlay('踩雷了!', false);
+  }
+  renderBoard();
+}
+
+// ============================================================
+//  Part 2: Rendering
+// ============================================================
+
+function renderBoard() {
+  const { rows, cols } = CFG;
+  for (let r = 0; r < rows; r++)
+    for (let c = 0; c < cols; c++)
+      renderCell(r, c, false);
+}
+
+function renderCell(r, c, animate) {
+  const idx = r * CFG.cols + c;
+  // Create cell on demand (keeps event listeners attached)
+  let el = minefieldEl.children[idx];
+  if (!el) {
+    el = document.createElement('div');
+    el.className = 'cell';
+    setupCellEvents(el, r, c);
+    minefieldEl.appendChild(el);
+  }
+  const cell = board[r][c];
+  el.className = 'cell';
+  el.textContent = '';
+  el.style.backgroundColor = '';
+  if (cell.revealed) {
+    el.classList.add('revealed');
+    // Per-player coloring: tint the cell by who swept it (only non-mine cells)
+    if (colorMode && cell.owner && !cell.mine) {
+      const col = ownerColor(cell.owner);
+      if (col) el.style.backgroundColor = col;
+    }
+    if (cell.mine) {
+      el.classList.add('mine');
+      if (cell.exploded) el.classList.add('exploded');
+    } else if (cell.adj > 0) {
+      el.classList.add('num' + cell.adj);
+      el.textContent = cell.adj;
+    }
+    if (animate) el.classList.add('anim');
+  } else if (cell.flagged) {
+    el.classList.add('flag');
+    if (cell.wrongFlag) el.classList.add('wrong-flag');
+  }
+  if (animate) el.classList.add('anim');
+}
+
+function updateMineCount() {
+  const n = CFG.mines - flagCount;
+  mineCountEl.textContent = String(Math.max(-99, Math.min(999, n))).padStart(3, '0');
+}
+
+function updateTimer() {
+  timerEl.textContent = String(Math.min(999, elapsed)).padStart(3, '0');
+}
+
+function startTimer() {
+  stopTimer();
+  timerInterval = setInterval(() => { elapsed++; updateTimer(); }, 1000);
+}
+function stopTimer() { if (timerInterval) { clearInterval(timerInterval); timerInterval = null; } }
+
+function showOverlay(text, win) {
+  overlayMsgEl.textContent = text;
+  overlayMsgEl.className = 'msg ' + (win ? 'win' : 'lose');
+  overlayEl.classList.add('show');
+  setTimeout(() => overlayEl.classList.remove('show'), 2500);
+}
+function hideOverlay() { overlayEl.classList.remove('show'); }
+
+// ============================================================
+//  Part 3: Event Handling
+// ============================================================
+
+let touchFlagTimer = null;
+let touchStarted = false;
+
+// ---- Hidden key-sequence feature (local only, never broadcast) ----
+let hintActive = false;
+let hintSeq = '';
+function handleGlobalKeydown(e) {
+  // Only reacts to plain keyboard input (English mode): IME composition is skipped
+  if (e.isComposing || e.key === 'Process') return;
+  if (e.key && e.key.length === 1) {
+    hintSeq = (hintSeq + e.key.toLowerCase()).slice(-6);
+    if (hintSeq === 'chimei' && !hintActive) {
+      hintActive = true;
+      const t = $('cheatToast');
+      t.textContent = 'hint on';
+      t.classList.add('show');
+      setTimeout(() => t.classList.remove('show'), 1600);
+    }
+  }
+}
+
+function handleCellClick(r, c, isRight, isChord) {
+  const cell = board[r][c];
+  // Joined client in multiplayer: send command to host, board comes back via 'board'
+  if (mp.connected && !mp.isHost) {
+    if (gameOver) return;
+    if (isRight) {
+      if (cell.revealed && cell.adj > 0) {
+        // Local hint: chord only when surrounding flags match the number;
+        // otherwise flash the unrevealed neighbors instantly (pure local feedback,
+        // no command needed since no state changes).
+        let flagAdj = 0;
+        const toReveal = [];
+        for (let dr = -1; dr <= 1; dr++)
+          for (let dc = -1; dc <= 1; dc++) {
+            if (!dr && !dc) continue;
+            const nr = r + dr, nc = c + dc;
+            if (nr >= 0 && nr < CFG.rows && nc >= 0 && nc < CFG.cols) {
+              if (board[nr][nc].flagged) flagAdj++;
+              else if (!board[nr][nc].revealed) toReveal.push([nr, nc]);
+            }
+          }
+        if (flagAdj === cell.adj) mp.sendToHost({ t: 'chord', r, c });
+        else flashCells(toReveal.length ? toReveal : [[r, c]]);
+      } else if (!cell.revealed) {
+        // optimistic local flag for instant feedback; host confirms via board snapshot
+        toggleFlag(r, c);
+        mp.sendToHost({ t: 'flag', r, c });
+      }
+    } else if (isChord || cell.revealed) {
+      mp.sendToHost({ t: 'chord', r, c });
+    } else {
+      if (!cell.flagged) mp.sendToHost({ t: 'reveal', r, c });
+    }
+    return;
+  }
+  const before = revealedCount;
+  const owner = (mp.connected && mp.isHost) ? mp.tx.myId : 'local';
+  if (isRight) {
+    // Right-click on a revealed number: chord if flags match, else flash hint
+    if (cell.revealed && cell.adj > 0) {
+      if (chordOrFlash(r, c, owner)) renderBoard();
+    } else {
+      toggleFlag(r, c);
+    }
+  } else if (isChord) {
+    chord(r, c, owner);
+    renderBoard();
+  } else {
+    if (cell.revealed) {
+      // Click on a revealed number = chord (auto-expand if flags match)
+      chord(r, c, owner);
+      renderBoard();
+    } else {
+      if (cell.flagged) return;
+      revealCell(r, c, owner);
+      renderBoard();
+    }
+  }
+  // Count newly revealed cells for this round's per-player stats
+  const delta = revealedCount - before;
+  if (delta > 0) {
+    if (mp.connected && mp.isHost) mp.addSwept('host', delta);
+    else if (!mp.connected) localSwept += delta;
+    renderStats();
+  }
+  // Host: after any local action, broadcast the authoritative snapshot
+  if (mp.connected && mp.isHost) mp.sendBoard();
+}
+
+function setupCellEvents(el, r, c) {
+  // Left click
+  el.addEventListener('click', e => {
+    if (e.ctrlKey || e.button === 1) return;
+    handleCellClick(r, c, false, false);
+  });
+  // Right click = flag
+  el.addEventListener('contextmenu', e => {
+    e.preventDefault();
+    handleCellClick(r, c, true, false);
+  });
+  // Middle click = chord
+  el.addEventListener('mousedown', e => {
+    if (e.button === 1) { e.preventDefault(); handleCellClick(r, c, false, true); }
+  });
+  // Double click = chord
+  el.addEventListener('dblclick', e => {
+    handleCellClick(r, c, false, true);
+  });
+  // Hover hint (hidden feature): mark whether the cell hides a mine
+  el.addEventListener('mouseenter', () => {
+    if (!hintActive || gameOver) return;
+    const cell = board[r][c];
+    if (cell.revealed) return;
+    el.classList.add(cell.mine ? 'cheat-mine' : 'cheat-safe');
+  });
+  el.addEventListener('mouseleave', () => {
+    el.classList.remove('cheat-mine', 'cheat-safe');
+  });
+  // Touch: tap=reveal, long press=flag
+  el.addEventListener('touchstart', e => {
+    e.preventDefault(); touchStarted = true;
+    touchFlagTimer = setTimeout(() => {
+      touchStarted = false;
+      handleCellClick(r, c, true, false);
+    }, 400);
+  }, { passive: false });
+  el.addEventListener('touchend', e => {
+    e.preventDefault();
+    if (touchFlagTimer) { clearTimeout(touchFlagTimer); touchFlagTimer = null; }
+    if (touchStarted) { touchStarted = false; handleCellClick(r, c, false, false); }
+  }, { passive: false });
+  el.addEventListener('touchmove', e => {
+    if (touchFlagTimer) { clearTimeout(touchFlagTimer); touchFlagTimer = null; }
+    touchStarted = false;
+  });
+}
+
+function buildGridWithEvents() {
+  const { rows, cols } = CFG;
+  minefieldEl.innerHTML = '';
+  minefieldEl.style.gridTemplateColumns = `repeat(${cols}, auto)`;
+  renderBoard();
+}
+
+// ============================================================
+//  Part 4: Difficulty & Fullscreen Mode
+// ============================================================
+
+function applyDifficulty() {
+  const val = $('difficulty').value;
+  if (val === 'fullscreen') {
+    isFullscreen = true;
+    minesPlaced = false; // switching difficulty always starts a fresh game
+    calcFullscreen();
+  } else {
+    isFullscreen = false;
+    const presets = {
+      easy: [9, 9, 10], medium: [16, 16, 40], hard: [16, 30, 99]
+    };
+    const [r, c, m] = presets[val];
+    initBoard(r, c, m);
+    buildGridWithEvents();
+  }
+}
+
+function setCellSizeStyle(cellSize) {
+  const styleId = 'fs-cell-style';
+  let st = document.getElementById(styleId);
+  if (!st) { st = document.createElement('style'); st.id = styleId; document.head.appendChild(st); }
+  st.textContent = `.cell { width:${cellSize}px; height:${cellSize}px; font-size:${Math.floor(cellSize*0.6)}px; }`;
+}
+
+// For joined clients in fullscreen mode: keep the host's rows/cols,
+// only fit the cell size to this client's screen.
+function fitCellSize() {
+  const wrap = $('gameWrap');
+  const availW = (wrap.clientWidth || window.innerWidth || 800) - 30;
+  const availH = (wrap.clientHeight || window.innerHeight || 600) - 80;
+  const { rows, cols } = CFG;
+  const cellSize = Math.max(10, Math.min(30,
+    Math.floor(availW / cols), Math.floor(availH / rows)));
+  setCellSizeStyle(cellSize);
+}
+
+function calcFullscreen() {
+  // Joined clients never recompute rows/cols — they follow the host's config
+  if (mp.connected && !mp.isHost) { fitCellSize(); return; }
+  // Once the game has started (mines placed), lock the rows/cols:
+  // resizing the window must only adapt the cell size, never restart.
+  if (minesPlaced) { fitCellSize(); return; }
+  const wrap = $('gameWrap');
+  const availW = (wrap.clientWidth || window.innerWidth || 800) - 30;
+  const availH = (wrap.clientHeight || window.innerHeight || 600) - 80;
+  let cellSize = 26;
+  // Try to find best fit
+  for (let cs = 30; cs >= 14; cs--) {
+    const cols = Math.floor(availW / cs);
+    const rows = Math.floor(availH / cs);
+    if (cols >= 8 && rows >= 8) { cellSize = cs; break; }
+  }
+  const cols = Math.max(8, Math.floor(availW / cellSize));
+  const rows = Math.max(8, Math.floor(availH / cellSize));
+  const mines = Math.round(rows * cols * 0.15);
+  // Apply cell size
+  setCellSizeStyle(cellSize);
+  initBoard(rows, cols, mines);
+  buildGridWithEvents();
+}
+
+// ============================================================
+//  Part 5: Multiplayer (MQTT relay)
+// ============================================================
+
+// Multiplayer is brokered over an MQTT pub/sub relay (EMQX public broker,
+// broker.emqx.io over WSS): each room maps to one topic. Every message
+// carries a `src` (sender id); hosts and clients both publish to and
+// subscribe on the room topic. Host-authoritative game logic is unchanged
+// — only the transport differs from PeerJS / ntfy.sh.
+const MQTT_URL = 'wss://broker.emqx.io:8084/mqtt';
+const MQTT_KEEPALIVE = 60; // seconds; PINGREQ sent at half that interval
+const JOIN_MSG_RETRIES = 12; // hello re-sent every 2s until welcome/denied
+const JOIN_MSG_INTERVAL = 2000;
+const CLIENT_PING_INTERVAL = 5000;  // client presence ping
+const CLIENT_ALIVE_TIMEOUT = 20000; // no host message for this long => disconnected
+const HOST_PING_INTERVAL = 4000;    // host broadcasts online/players
+const HOST_CLEAN_INTERVAL = 8000;   // host reaps players silent > 15s
+const HOST_REAP_TIMEOUT = 15000;
+
+// ---- Minimal MQTT 3.1.1 client (QoS0, WebSocket transport) ----
+// Inlined so the game stays a single self-contained file with zero CDN
+// dependency (jsDelivr/unpkg/Cloudflare are unreliable from mainland CN).
+// Covers CONNECT/CONNACK, SUBSCRIBE/SUBACK, UNSUBSCRIBE, PUBLISH(QoS0),
+// PINGREQ/PINGRESP, DISCONNECT + auto-reconnect with re-subscribe.
+function createMiniMqtt(url, opts) {
+  opts = opts || {};
+  const clientId = opts.clientId || ('msw-' + Math.random().toString(36).slice(2, 12));
+  const keepalive = opts.keepalive || MQTT_KEEPALIVE;
+  const self = api();
+  let ws = null, ready = false, closed = false;
+  let pingTimer = null, reconnectTimer = null, reconnectDelay = 1500;
+  let packetId = 1, lastSent = 0;
+  const subs = new Map();   // topic -> [handlers]
+  const sentSubs = new Set();
+
+  function api() {
+    return {
+      get ready() { return ready; },
+      get closed() { return closed; },
+      _listeners: { connect: [], message: [], close: [], error: [] },
+      on(ev, fn) { (this._listeners[ev] || (this._listeners[ev] = [])).push(fn); return this; },
+      subscribe(topic, handler) {
+        if (!subs.has(topic)) subs.set(topic, []);
+        subs.get(topic).push(handler);
+        if (ready && !sentSubs.has(topic)) sendSub(topic);
+        return this;
+      },
+      unsubscribe(topic) {
+        subs.delete(topic);
+        if (ready && sentSubs.has(topic)) sendUnsub(topic);
+        sentSubs.delete(topic);
+        return this;
+      },
+      publish(topic, payload, retained) {
+        if (ready) sendPub(topic, typeof payload === 'string' ? payload : JSON.stringify(payload), !!retained);
+        return this;
+      },
+      end() {
+        closed = true;
+        clearInterval(pingTimer); pingTimer = null;
+        clearTimeout(reconnectTimer); reconnectTimer = null;
+        if (ready) { try { sendBytes([0xE0, 0x00]); } catch (e) {} }
+        if (ws) { try { ws.close(); } catch (e) {} ws = null; }
+        ready = false;
+        emit('close');
+      }
+    };
+  }
+
+  function emit(ev) {
+    const a = Array.prototype.slice.call(arguments, 1);
+    (self._listeners[ev] || []).forEach(f => { try { f.apply(null, a); } catch (e) {} });
+  }
+
+  // ---------- packet encoding ----------
+  function encRemaining(len) {
+    const out = [];
+    do { let b = len % 128; len = Math.floor(len / 128); if (len > 0) b |= 0x80; out.push(b); } while (len > 0);
+    return out;
+  }
+  function encStr(s) {
+    const b = new TextEncoder().encode(String(s));
+    const head = [b.length >> 8, b.length & 0xff];
+    return head.concat(Array.from(b));
+  }
+  function sendBytes(bytes) {
+    if (!ws || ws.readyState !== 1) return;
+    lastSent = Date.now();
+    ws.send(new Uint8Array(bytes));
+  }
+  function buildPkt(header, parts) {
+    let body = [];
+    parts.forEach(p => { body = body.concat(p); });
+    return [header].concat(encRemaining(body.length)).concat(body);
+  }
+  function sendConnect() {
+    const parts = [
+      [0x00, 0x04, 0x4d, 0x51, 0x54, 0x54], // "MQTT"
+      [0x04],                               // protocol level 3.1.1
+      [0x02],                               // clean session
+      [keepalive >> 8, keepalive & 0xff],
+      encStr(clientId)
+    ];
+    sendBytes(buildPkt(0x10, parts));
+  }
+  function sendSub(topic) {
+    const pid = packetId++;
+    sendBytes(buildPkt(0x82, [[pid >> 8, pid & 0xff], encStr(topic), [0x00]]));
+    sentSubs.add(topic);
+  }
+  function sendUnsub(topic) {
+    const pid = packetId++;
+    sendBytes(buildPkt(0xa2, [[pid >> 8, pid & 0xff], encStr(topic)]));
+  }
+  function sendPub(topic, payload, retained) {
+    const pbytes = new TextEncoder().encode(payload);
+    sendBytes(buildPkt(0x30 | (retained ? 0x01 : 0x00), [encStr(topic), Array.from(pbytes)]));
+  }
+  function sendPing() { sendBytes([0xc0, 0x00]); }
+
+  // ---------- connection management ----------
+  function connect() {
+    if (closed) return;
+    try { ws = new WebSocket(url, 'mqtt'); } catch (e) { scheduleReconnect(); return; }
+    ws.binaryType = 'arraybuffer';
+    ws.onopen = () => { sendConnect(); };
+    ws.onmessage = ev => { lastSent = Date.now(); try { handleFrame(ev.data); } catch (e) {} };
+    ws.onclose = () => { onDisconnect(); };
+    ws.onerror = () => {};
+  }
+  function scheduleReconnect() {
+    if (closed) return;
+    clearTimeout(reconnectTimer);
+    reconnectTimer = setTimeout(() => { reconnectDelay = Math.min(reconnectDelay * 1.6, 15000); connect(); }, reconnectDelay);
+  }
+  function onDisconnect() {
+    const wasReady = ready;
+    ready = false;
+    clearInterval(pingTimer); pingTimer = null;
+    ws = null;
+    if (wasReady) emit('close');
+    if (!closed) scheduleReconnect();
+  }
+  function handleFrame(buf) {
+    const bytes = buf instanceof ArrayBuffer ? new Uint8Array(buf) : new Uint8Array(buf.buffer || buf);
+    let pos = 0;
+    while (pos < bytes.length) {
+      const type = bytes[pos] >> 4;
+      // remaining length (variable-length integer)
+      let rem = 0, mult = 1, i = pos + 1;
+      while (i < bytes.length && i - pos <= 4) {
+        const b = bytes[i++];
+        rem += (b & 0x7f) * mult;
+        if (!(b & 0x80)) break;
+        mult *= 128;
+      }
+      if (bytes.length - i < rem) return; // truncated frame: drop (should not happen over WS)
+      const data = bytes.subarray(i, i + rem);
+      pos = i + rem;
+      try {
+        if (type === 0x2) { // CONNACK
+          if (data.length >= 2 && data[1] === 0 && !ready) {
+            ready = true;
+            reconnectDelay = 1500;
+            sentSubs.forEach(t => sendSub(t));
+            clearInterval(pingTimer);
+            pingTimer = setInterval(() => { if (ready && Date.now() - lastSent > keepalive * 1000 / 2) sendPing(); }, Math.max(2000, keepalive * 1000 / 4));
+            emit('connect');
+          }
+        } else if (type === 0x3) { // PUBLISH
+          const tlen = (data[0] << 8) | data[1];
+          const topic = new TextDecoder().decode(data.subarray(2, 2 + tlen));
+          const payload = new TextDecoder().decode(data.subarray(2 + tlen));
+          const hs = subs.get(topic);
+          if (hs) hs.slice().forEach(h => { try { h(topic, payload); } catch (e) {} });
+        }
+        // SUBACK(0x9)/PINGRESP(0xd)/PUBACK(0x4)/others: nothing to do at QoS0
+      } catch (e) {}
+    }
+  }
+
+  connect();
+  return self;
+}
+
+const mp = {
+  tx: {           // MQTT relay transport state
+    myId: '',     // this client's id ('h-'/host, 'p-'/joiner) == MQTT clientId
+    topic: '',    // room MQTT topic (derived from room code)
+    mqtt: null,   // MiniMQTT client instance
+    es: null,     // current subscription handle (returned by _subscribe)
+    lastSeen: 0   // last time any relay message was received (client liveness)
+  },
+  conns: [],      // kept for API compat; unused in relay mode
+  connected: false,
+  isHost: false,
+  roomCode: null,
+  roomName: '',
+  roomPass: '',
+  onlineCount: 1,
+  players: [],    // [{id, name, swept}] — host keeps authoritative list
+  heartbeatTimer: null,   // host: room-list heartbeat
+  _hostPingTimer: null,   // host: online/players broadcast
+  _hostCleanTimer: null,  // host: reap silent players
+  _clientHbTimer: null,   // client: presence ping
+  _clientAliveTimer: null,// client: host liveness check
+  _helloTimer: null,      // client: join hello retry
+  pendingJoin: null,      // {code, pass} while awaiting auth
+  pings: {},              // host: playerId -> lastSeen timestamp
+  lobbyRooms: {},         // code -> room info (MQTT lobby snapshot)
+  lobbySub: null,         // reserved (room list now via retained snapshot)
+
+  // ----- MQTT relay transport -----
+
+  // Encode a room code into an MQTT topic (topic chars: [a-zA-Z0-9_-]).
+  _roomTopic(code) {
+    const safe = btoa(unescape(encodeURIComponent(String(code))))
+      .replace(/\+/g, '-').replace(/\//g, '_').replace(/=+$/, '');
+    return 'msw-r-' + safe;
+  },
+
+  // Make sure a MiniMQTT connection exists and is connected; queue `cb`
+  // to run right after the next successful CONNACK.
+  _ensureMqtt(cb) {
+    if (!this._mqttCbs) this._mqttCbs = [];
+    const mq = this.tx.mqtt;
+    if (mq && mq.ready) { cb(); return; }
+    if (mq && !mq.closed) { this._mqttCbs.push(cb); return; }
+    const self = this;
+    const fresh = createMiniMqtt(MQTT_URL, {
+      clientId: 'msw-' + (this.tx.myId || '').replace(/[^a-zA-Z0-9]/g, '') + Math.random().toString(36).slice(2, 8),
+      keepalive: MQTT_KEEPALIVE
+    });
+    this.tx.mqtt = fresh;
+    fresh.on('connect', () => {
+      if (self.tx.mqtt !== fresh) { try { fresh.end(); } catch (e) {} return; }
+      const cbs = self._mqttCbs || []; self._mqttCbs = [];
+      cbs.forEach(f => { try { f(); } catch (e) {} });
+    });
+    fresh.on('close', () => {
+      if (self.tx.mqtt === fresh) self.tx.mqtt = null;
+    });
+    fresh.on('error', () => {});
+    this._mqttCbs.push(cb);
+  },
+
+  // Publish a message to the current room topic (sender id always attached).
+  _publish(data) {
+    if (!this.tx.topic) return;
+    data = Object.assign({ src: this.tx.myId }, data);
+    const mq = this.tx.mqtt;
+    if (mq && mq.ready) {
+      mq.publish(this.tx.topic, JSON.stringify(data));
+    }
+  },
+
+  // Subscribe to a room topic; every relay message is passed to onMsg.
+  // Returns a handle with an assignable `onopen` callback (fired once the
+  // subscription is live).
+  _subscribe(topic, onMsg) {
+    const sub = { topic, _closed: false, onopen: null };
+    this.tx.es = sub;
+    const self = this;
+    this._ensureMqtt(() => {
+      if (sub._closed || self.tx.es !== sub) return;
+      const mq = self.tx.mqtt;
+      if (!mq || !mq.ready) return;
+      mq.subscribe(topic, (t, payload) => {
+        if (sub._closed) return;
+        try { onMsg(JSON.parse(payload)); } catch (e) {}
+      });
+      if (sub.onopen) sub.onopen();
+    });
+    return sub;
+  },
+
+  // Relay message handler: ignore our own echoes, route to game logic.
+  _onRelayMsg(m) {
+    if (!m || typeof m !== 'object' || !m.t) return;
+    if (m.src === this.tx.myId) return; // MQTT echoes messages back to the sender
+    this.tx.lastSeen = Date.now();
+    // Host creating a room: any foreign message on the fresh topic = name taken
+    if (this.isHost && !this.connected) {
+      this._onCreateConflict();
+      return;
+    }
+    this.onData(m);
+  },
+
+  // Read the latest retained snapshot on a topic (subscribe triggers the
+  // broker to push retained messages immediately). Resolves null on timeout.
+  _readSnapshot(topic, timeout) {
+    return new Promise((resolve) => {
+      const mq = this.tx.mqtt;
+      if (!mq || !mq.ready) { resolve(null); return; }
+      let done = false;
+      const finish = (val) => { if (done) return; done = true; clearTimeout(timer); mq.unsubscribe(topic); resolve(val); };
+      const timer = setTimeout(() => finish(null), timeout || 4000);
+      mq.subscribe(topic, (t, payload) => {
+        try { finish(JSON.parse(payload)); } catch (e) { finish(null); }
+      });
+    });
+  },
+
+  // Write a snapshot as a retained message (new subscribers get it instantly).
+  _writeSnapshot(topic, obj) {
+    const mq = this.tx.mqtt;
+    if (!mq || !mq.ready) return;
+    mq.publish(topic, JSON.stringify(obj), true);
+  },
+
+  // Tear down relay transport + all room timers.
+  _cleanupTx() {
+    if (this.tx.es) this.tx.es._closed = true;
+    this.tx.es = null;
+    if (this.tx.mqtt) { try { this.tx.mqtt.end(); } catch (e) {} }
+    this.tx.mqtt = null;
+    this._mqttCbs = [];
+    this.tx.topic = '';
+    this.tx.myId = '';
+    this.tx.lastSeen = 0;
+    if (this._helloTimer) { clearTimeout(this._helloTimer); this._helloTimer = null; }
+    if (this._joinTimeout) { clearTimeout(this._joinTimeout); this._joinTimeout = null; }
+    if (this._conflictTimer) { clearTimeout(this._conflictTimer); this._conflictTimer = null; }
+    this.stopHeartbeat();
+    this._stopClientHeartbeat();
+    this.pings = {};
+  },
+
+  init() {
+    this.stopHeartbeat();
+    this.closeLobbySub();
+    this._cleanupTx();
+    this.conns = [];
+    this.connected = false;
+    this.isHost = false;
+    this.roomCode = null;
+    this.roomName = '';
+    this.roomPass = '';
+    this.onlineCount = 1;
+    this.players = [];
+    this.pendingJoin = null;
+    this.updateUI();
+  },
+
+  createRoom(name, pass) {
+    name = (name || '').trim();
+    if (!name) { this.updateStatus('请输入房间名'); alertModal('提示', '请输入房间名'); return; }
+    this._cleanupTx();
+    this.updateStatus('正在创建房间...');
+    // Room name IS the room code — others join by typing this name
+    this.roomCode = name;
+    this.roomName = name;
+    this.roomPass = pass || '';
+    this.isHost = true;
+    this.tx.myId = 'h-' + Math.random().toString(36).slice(2, 8) + Date.now().toString(36).slice(-4);
+    this.tx.topic = this._roomTopic(name);
+    this.players = [{ id: this.tx.myId, name: myName, swept: 0 }];
+    this.onlineCount = 1;
+    this.pings = {};
+    const self = this;
+    const es = this._subscribe(this.tx.topic, m => self._onRelayMsg(m));
+    // Any foreign message during the first 2.5s means the room name is
+    // already in use (another host or an active game on the same topic).
+    this._conflictTimer = setTimeout(() => { this._conflictTimer = null; }, 2500);
+    es.onopen = () => {
+      if (self.tx.es !== es) return;
+      self.connected = true;
+      self.updateStatus('房间已创建: ' + name);
+      self.updateUI();
+      self.publishRoom();
+      self.startHeartbeat();
+      self._broadcastOnline();
+      addSysChat('房间已创建！点「邀请好友」复制链接发给好友，或把房间名「' + name + '」告诉对方');
+    };
+  },
+
+  // Host creating a room discovered the name is taken -> abort creation.
+  _onCreateConflict() {
+    if (this._conflictTimer) { clearTimeout(this._conflictTimer); this._conflictTimer = null; }
+    this.updateStatus('房间名「' + this.roomName + '」已被占用，请换一个');
+    alertModal('房间名冲突', '房间名「' + this.roomName + '」已被他人使用，请换一个名字');
+    this._cleanupTx();
+    this.roomCode = null;
+    this.roomName = '';
+    this.roomPass = '';
+    this.isHost = false;
+    this.connected = false;
+    this.players = [];
+    this.updateUI();
+  },
+
+  joinRoom(code, pass) {
+    code = (code || '').trim();
+    if (!code) return;
+    this._cleanupTx();
+    this.updateStatus('正在加入房间「' + code + '」...');
+    this.isHost = false;
+    this.roomCode = code;
+    this.roomName = '';
+    this.roomPass = '';
+    this.players = [];
+    this.pendingJoin = { code, pass: pass || '' };
+    this.tx.myId = 'p-' + Math.random().toString(36).slice(2, 8) + Date.now().toString(36).slice(-4);
+    this.tx.topic = this._roomTopic(code);
+    const self = this;
+    const es = this._subscribe(this.tx.topic, m => self._onRelayMsg(m));
+    let retries = 0;
+    // Re-send hello every 2s until the host answers (welcome/denied),
+    // or we exhaust JOIN_MSG_RETRIES (~24s).
+    const tryHello = () => {
+      if (self.connected || self.tx.es !== es) return;
+      if (retries >= JOIN_MSG_RETRIES) {
+        self.updateStatus('加入超时：房间「' + code + '」不存在或未响应，请检查房间名和网络');
+        self.cleanupFailedJoin();
+        return;
+      }
+      retries++;
+      self._publish({ t: 'hello', name: myName, pass: pass || '' });
+      self._helloTimer = setTimeout(tryHello, JOIN_MSG_INTERVAL);
+    };
+    // Overall fallback in case the MQTT subscription never opens.
+    this._joinTimeout = setTimeout(() => {
+      if (!self.connected && self.tx.es === es) {
+        self.updateStatus('加入超时：无法连接联机服务器，请检查网络后重试');
+        self.cleanupFailedJoin();
+      }
+    }, 30000);
+    es.onopen = () => {
+      if (self.tx.es !== es) return;
+      tryHello();
+    };
+  },
+
+  cleanupFailedJoin() {
+    if (this._helloTimer) { clearTimeout(this._helloTimer); this._helloTimer = null; }
+    if (this._joinTimeout) { clearTimeout(this._joinTimeout); this._joinTimeout = null; }
+    this.pendingJoin = null;
+    this.roomCode = null;
+    this.isHost = false;
+    this.connected = false;
+    this.conns = [];
+    this._cleanupTx();
+    this.updateUI();
+  },
+
+  leaveRoom() {
+    // Remove room from lobby if host
+    if (this.isHost && this.connected) {
+      this.removeRoom();
+      this._publish({ t: 'close' }); // tell clients the room is gone
+    } else if (!this.isHost && this.connected) {
+      this._publish({ t: 'leave' }); // tell the host we left
+    }
+    this._cleanupTx();
+    this.closeLobbySub();
+    this.conns = [];
+    this.connected = false;
+    this.isHost = false;
+    this.roomCode = null;
+    this.roomName = '';
+    this.roomPass = '';
+    this.onlineCount = 1;
+    this.players = [];
+    this.updateStatus('已离开房间');
+    this.updateUI();
+  },
+
+  // Host -> everyone: publish to the room topic (own echo is filtered out)
+  broadcast(data) {
+    if (!this.tx.topic) return;
+    data = Object.assign({ src: this.tx.myId }, data);
+    this._publish(data);
+  },
+
+  // Client sends a command to the host (same relay topic; host filters by type)
+  sendToHost(data) {
+    if (!this.tx.topic) return;
+    this._publish(Object.assign({ src: this.tx.myId }, data));
+  },
+
+  // Host: credit `delta` newly-revealed cells to the player with `id`
+  addSwept(id, delta) {
+    const p = this.players.find(p => p.id === id);
+    if (p) p.swept = (p.swept || 0) + delta;
+  },
+
+  // Serialize players for wire transfer (id + name + per-round swept count)
+  serPlayers() {
+    return this.players.map(p => ({ id: p.id, name: p.name, swept: p.swept || 0 }));
+  },
+
+  // Host -> new client: full state (broadcast with dst so only that peer applies it)
+  sendWelcomeTo(dstId) {
+    this.broadcast({
+      t: 'welcome', dst: dstId, cfg: CFG, board: serializeBoard(), fc: flagCount, rc: revealedCount,
+      go: gameOver, gw: gameWon, el: elapsed, fs: isFullscreen, diff: $('difficulty').value,
+      roomName: this.roomName, players: this.serPlayers(), n: this.onlineCount
+    });
+  },
+
+  // Host -> all clients: authoritative board snapshot
+  sendBoard() {
+    if (!this.connected || !this.isHost) return;
+    this.broadcast({
+      t: 'board', cfg: CFG, board: serializeBoard(), fc: flagCount, rc: revealedCount,
+      go: gameOver, gw: gameWon, el: elapsed, fs: isFullscreen, diff: $('difficulty').value,
+      players: this.serPlayers()
+    });
+    renderStats();
+  },
+
+  // Client applies a board snapshot coming from the host
+  applyRemoteBoard(state) {
+    const cfgChanged = !CFG || !state.cfg || CFG.rows !== state.cfg.rows || CFG.cols !== state.cfg.cols;
+    const wasOver = gameOver;
+    if (state.cfg) CFG = state.cfg;
+    if (state.fs !== undefined) isFullscreen = state.fs;
+    if (state.diff) $('difficulty').value = state.diff;
+    // Players must be known before decoding the board (owner indices -> ids)
+    if (state.players) {
+      this.players = state.players.map(p =>
+        typeof p === 'string' ? { name: p, swept: 0 } : { id: p.id, name: p.name, swept: p.swept || 0 });
+    }
+    board = decodeBoard(state.board, this.players);
+    flagCount = state.fc; revealedCount = state.rc;
+    gameOver = state.go; gameWon = state.gw; elapsed = state.el;
+    firstClick = !state.go && state.rc === 0;
+    minesPlaced = true; // board comes from host, mines already defined
+    if (state.go) { smileyEl.innerHTML = state.gw ? '&#128526;' : '&#128565;'; stopTimer(); }
+    else if (state.rc > 0) startTimer(); else stopTimer();
+    updateMineCount(); updateTimer();
+    if (cfgChanged) { buildGridWithEvents(); } else { renderBoard(); }
+    if (isFullscreen) fitCellSize();
+    renderStats();
+    if (gameOver && !wasOver) {
+      showOverlay(gameWon ? '胜利!' : '踩雷了!', gameWon);
+      if (gameWon) recordScore(myName, elapsed, difficultyLabel());
+    }
+  },
+
+  onData(data) {
+    if (this.isHost) this.handleHostData(data);
+    else this.handleClientData(data);
+  },
+
+  // ---- Host side: receives commands from clients (via relay messages) ----
+  handleHostData(data) {
+    switch (data.t) {
+      case 'hello': {
+        // Password check
+        if (this.roomPass && data.pass !== this.roomPass) {
+          this._publish({ t: 'denied', dst: data.src, reason: '密码错误' });
+          this.updateStatus('拒绝加入: 密码错误');
+          return;
+        }
+        const existing = this.players.find(p => p.id === data.src);
+        if (!existing) this.players.push({ id: data.src, name: (data.name || '玩家').slice(0, 12), swept: 0 });
+        else existing.name = (data.name || '玩家').slice(0, 12);
+        this.pings[data.src] = Date.now();
+        this.onlineCount = this.players.length;
+        this.updateUI();
+        this.sendWelcomeTo(data.src);
+        this.broadcast({ t: 'online', n: this.onlineCount, players: this.serPlayers() });
+        this.broadcast({ t: 'sys', msg: (data.name || '玩家') + ' 加入了房间' });
+        this.publishRoom();
+        break;
+      }
+      case 'reveal': {
+        const before = revealedCount;
+        revealCell(data.r, data.c, data.src);
+        const d = revealedCount - before;
+        if (d > 0) this.addSwept(data.src, d);
+        renderBoard();
+        this.sendBoard();
+        break;
+      }
+      case 'flag':
+        toggleFlag(data.r, data.c);
+        renderBoard();
+        this.sendBoard();
+        break;
+      case 'chord': {
+        const before = revealedCount;
+        chord(data.r, data.c, data.src);
+        const d = revealedCount - before;
+        if (d > 0) this.addSwept(data.src, d);
+        renderBoard();
+        this.sendBoard();
+        break;
+      }
+      case 'chat': {
+        const sender = (this.players.find(p => p.id === data.src) || {}).name || myName;
+        const msg = String(data.msg || '').slice(0, 200);
+        if (msg) {
+          addChatLine(sender, msg, Date.now()); // host renders it locally too (broadcast never reaches the host itself)
+          this.broadcast({ t: 'chat', name: sender, msg, ts: Date.now() });
+        }
+        break;
+      }
+      case 'newgame':
+        applyDifficulty();
+        this.sendBoard();
+        break;
+      case 'leave': {
+        const p = this.players.find(x => x.id === data.src);
+        this.players = this.players.filter(x => x.id !== data.src);
+        delete this.pings[data.src];
+        this.onlineCount = this.players.length;
+        this.updateUI();
+        this.broadcast({ t: 'online', n: this.onlineCount, players: this.serPlayers() });
+        this.broadcast({ t: 'sys', msg: (p ? p.name : '玩家') + ' 离开了房间' });
+        this.publishRoom();
+        break;
+      }
+      case 'ping': {
+        // Presence heartbeat; re-admit players who dropped and reconnected
+        // after being reaped (MQTT auto-reconnect scenario).
+        this.pings[data.src] = Date.now();
+        if (!this.players.find(x => x.id === data.src)) {
+          this.players.push({ id: data.src, name: (data.name || '玩家').slice(0, 12), swept: 0 });
+          this.onlineCount = this.players.length;
+          this.updateUI();
+          this.broadcast({ t: 'online', n: this.onlineCount, players: this.serPlayers() });
+          this.broadcast({ t: 'sys', msg: (data.name || '玩家') + ' 已重新连接' });
+          this.publishRoom();
+        }
+        break;
+      }
+    }
+  },
+
+  // ---- Client side: receives authoritative state from host ----
+  handleClientData(data) {
+    switch (data.t) {
+      case 'welcome':
+        if (data.dst && data.dst !== this.tx.myId) return; // not for us
+        if (this._helloTimer) { clearTimeout(this._helloTimer); this._helloTimer = null; }
+        if (this._joinTimeout) { clearTimeout(this._joinTimeout); this._joinTimeout = null; }
+        this.pendingJoin = null;
+        this.connected = true;
+        this.roomName = data.roomName || '';
+        this.players = (data.players || []).map(p =>
+          typeof p === 'string' ? { name: p, swept: 0 } : { id: p.id, name: p.name, swept: p.swept || 0 });
+        this.updateStatus('已加入房间');
+        this.applyRemoteBoard(data);
+        this.updateUI();
+        this._startClientHeartbeat();
+        addSysChat('已加入房间 ' + this.roomCode);
+        break;
+      case 'board':
+        this.applyRemoteBoard(data);
+        break;
+      case 'online':
+        this.onlineCount = data.n;
+        this.players = (data.players || []).map(p =>
+          typeof p === 'string' ? { name: p, swept: 0 } : { id: p.id, name: p.name, swept: p.swept || 0 });
+        this.updateUI();
+        break;
+      case 'chat':
+        addChatLine(data.name, data.msg, data.ts);
+        break;
+      case 'sys':
+        addSysChat(data.msg);
+        break;
+      case 'end':
+        // informational; board snapshot already carries go/gw
+        break;
+      case 'denied':
+        if (data.dst && data.dst !== this.tx.myId) return; // not for us
+        if (this._helloTimer) { clearTimeout(this._helloTimer); this._helloTimer = null; }
+        if (this._joinTimeout) { clearTimeout(this._joinTimeout); this._joinTimeout = null; }
+        this.updateStatus('加入失败: ' + (data.reason || '密码错误'));
+        alertModal('加入失败', data.reason || '密码错误，请重试');
+        this.cleanupFailedJoin();
+        break;
+      case 'close':
+        // Host shut the room down
+        this._cleanupTx();
+        this.connected = false;
+        this.isHost = false;
+        this.roomCode = null;
+        this.roomName = '';
+        this.roomPass = '';
+        this.onlineCount = 1;
+        this.players = [];
+        this.pendingJoin = null;
+        this.updateStatus('主机已关闭房间');
+        this.updateUI();
+        addSysChat('主机已关闭房间');
+        break;
+    }
+  },
+
+  updateStatus(msg) { $('mpStatus').textContent = msg; },
+  updateUI() {
+    $('roomCode').textContent = this.roomCode || '-';
+    $('onlineCount').textContent = this.onlineCount;
+    $('createRoomBtn').disabled = this.connected;
+    $('joinRoomBtn').disabled = this.connected;
+    $('leaveRoomBtn').disabled = !this.connected;
+    // Invite link is only available to the host of a live room
+    $('inviteBtn').disabled = !(this.connected && this.isHost);
+    // Joined clients have no permission to change difficulty — follow the host
+    $('difficulty').disabled = this.connected && !this.isHost;
+    const chatRoomLabel = this.connected ? (this.roomName || this.roomCode) : '未连接';
+    if (chatRoomLabel !== $('chatRoomLabel').textContent) {
+      $('chatRoomLabel').textContent = chatRoomLabel;
+    }
+    renderStats();
+  },
+
+  // ============ Lobby & leaderboard (MQTT retained snapshots) ============
+  // Room list and leaderboard are stored as single retained JSON snapshots
+  // on two fixed topics. The broker pushes retained messages to any new
+  // subscriber, so read-modify-write gives us a shared "database" without
+  // any server. Concurrency races are possible but harmless at this scale.
+  lobbyTopic: 'msw-room-list-v1',
+  lbTopic: 'msw-lb-v1',
+
+  async publishRoom() {
+    if (!this.isHost || !this.roomCode) return;
+    await new Promise(res => this._ensureMqtt(res));
+    const payload = {
+      code: this.roomCode, name: this.roomName, players: this.onlineCount,
+      pass: !!this.roomPass, ts: Date.now(), host: myName
+    };
+    let snap = await this._readSnapshot(this.lobbyTopic);
+    if (!snap || typeof snap !== 'object' || Array.isArray(snap)) snap = {};
+    snap[this.roomCode] = payload;
+    this._writeSnapshot(this.lobbyTopic, snap);
+  },
+
+  async removeRoom() {
+    if (!this.roomCode) return;
+    await new Promise(res => this._ensureMqtt(res));
+    const snap = await this._readSnapshot(this.lobbyTopic);
+    if (snap && typeof snap === 'object' && snap[this.roomCode]) {
+      delete snap[this.roomCode];
+      this._writeSnapshot(this.lobbyTopic, snap);
+    }
+  },
+
+  // Host: broadcast presence + reap silent players + refresh lobby entry.
+  startHeartbeat() {
+    this.stopHeartbeat();
+    this._hostPingTimer = setInterval(() => this._broadcastOnline(), HOST_PING_INTERVAL);
+    this._hostCleanTimer = setInterval(() => this._hostCleanPlayers(), HOST_CLEAN_INTERVAL);
+    this.heartbeatTimer = setInterval(() => this.publishRoom(), 25000);
+  },
+
+  stopHeartbeat() {
+    if (this.heartbeatTimer) { clearInterval(this.heartbeatTimer); this.heartbeatTimer = null; }
+    if (this._hostPingTimer) { clearInterval(this._hostPingTimer); this._hostPingTimer = null; }
+    if (this._hostCleanTimer) { clearInterval(this._hostCleanTimer); this._hostCleanTimer = null; }
+  },
+
+  // Host: broadcast current online list (also serves as heartbeat for clients)
+  _broadcastOnline() {
+    if (!this.connected || !this.isHost || !this.tx.topic) return;
+    this.broadcast({ t: 'online', n: this.onlineCount, players: this.serPlayers() });
+  },
+
+  // Host: drop players who stopped pinging (> HOST_REAP_TIMEOUT)
+  _hostCleanPlayers() {
+    if (!this.connected || !this.isHost) return;
+    const now = Date.now();
+    let changed = false;
+    for (const id in this.pings) {
+      if (now - this.pings[id] > HOST_REAP_TIMEOUT) {
+        const p = this.players.find(x => x.id === id);
+        delete this.pings[id];
+        this.players = this.players.filter(x => x.id !== id);
+        changed = true;
+        this.broadcast({ t: 'sys', msg: (p ? p.name : '玩家') + ' 已断开（长时间无响应）' });
+      }
+    }
+    if (changed) {
+      this.onlineCount = this.players.length;
+      this.updateUI();
+      this.broadcast({ t: 'online', n: this.onlineCount, players: this.serPlayers() });
+      this.publishRoom();
+    }
+  },
+
+  // Client: presence ping + host-liveness watchdog
+  _startClientHeartbeat() {
+    this._stopClientHeartbeat();
+    const self = this;
+    this._clientHbTimer = setInterval(() => {
+      if (self.connected && !self.isHost && self.tx.topic) {
+        self._publish({ t: 'ping', name: myName });
+      }
+    }, CLIENT_PING_INTERVAL);
+    this._clientAliveTimer = setInterval(() => {
+      if (!self.connected || self.isHost) return;
+      if (Date.now() - (self.tx.lastSeen || 0) > CLIENT_ALIVE_TIMEOUT) {
+        self.connected = false;
+        self.onlineCount = 1;
+        self.updateStatus('与主机断开连接');
+        self.updateUI();
+        addSysChat('与主机断开连接（长时间未收到主机消息）');
+        self._cleanupTx();
+      }
+    }, CLIENT_PING_INTERVAL);
+  },
+
+  _stopClientHeartbeat() {
+    if (this._clientHbTimer) { clearInterval(this._clientHbTimer); this._clientHbTimer = null; }
+    if (this._clientAliveTimer) { clearInterval(this._clientAliveTimer); this._clientAliveTimer = null; }
+  },
+
+  // ================= Global leaderboard =================
+  async publishScoreToNet(name, time, diff) {
+    if (!name || typeof time !== 'number' || !(time > 0)) return;
+    await new Promise(res => this._ensureMqtt(res));
+    const snap = await this._readSnapshot(this.lbTopic);
+    const list = (snap && Array.isArray(snap.scores)) ? snap.scores : [];
+    // keep only the best (fastest) time per name+difficulty
+    const idx = list.findIndex(s => s.name === name && s.diff === diff);
+    if (idx >= 0 && list[idx].time <= time) return;
+    if (idx >= 0) list.splice(idx, 1);
+    list.push({ name, time, diff, ts: Date.now() });
+    list.sort((a, b) => a.time - b.time);
+    this._writeSnapshot(this.lbTopic, { scores: list.slice(0, 200), updated: Date.now() });
+  },
+
+  async fetchNetLb() {
+    try {
+      await new Promise(res => this._ensureMqtt(res));
+      const snap = await this._readSnapshot(this.lbTopic);
+      return (snap && Array.isArray(snap.scores)) ? snap.scores : [];
+    } catch (e) {
+      console.warn('Leaderboard fetch failed:', e);
+      return null;
+    }
+  },
+
+  async fetchRooms() {
+    try {
+      await new Promise(res => this._ensureMqtt(res));
+      const snap = await this._readSnapshot(this.lobbyTopic);
+      const now = Date.now();
+      const out = {};
+      if (snap && typeof snap === 'object' && !Array.isArray(snap)) {
+        for (const code in snap) {
+          const m = snap[code];
+          if (!m || !m.code) continue;
+          if (now - m.ts > 120000) continue; // stale (>2min no heartbeat)
+          out[code] = m;
+        }
+      }
+      this.lobbyRooms = out;
+      return out;
+    } catch (e) {
+      console.warn('Room list fetch failed:', e);
+      return null;
+    }
+  },
+
+  closeLobbySub() { this.lobbySub = null; }
+};
+
+// ---- Compact board encoding: 3 chars per cell [state][adj][owner] ----
+// state bits: 1=mine 2=revealed 4=flagged 8=exploded 16=wrongFlag
+// owner: 1-based index into mp.players (players list order), '-' = none.
+// 1000-cell boards encode to ~3KB, well under MQTT message size limits.
+const CELL_CHARS = '0123456789abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ-_';
+function encodeBoard() {
+  const ownerMap = {};
+  if (mp && Array.isArray(mp.players)) {
+    mp.players.forEach((p, i) => { ownerMap[p.id] = i + 1; });
+  }
+  return board.map(row => row.map(c => {
+    let s = 0;
+    if (c.mine) s |= 1;
+    if (c.revealed) s |= 2;
+    if (c.flagged) s |= 4;
+    if (c.exploded) s |= 8;
+    if (c.wrongFlag) s |= 16;
+    const o = c.owner ? (ownerMap[c.owner] || 0) : 0;
+    return CELL_CHARS[s] + CELL_CHARS[c.adj >= 0 ? c.adj : 0] + (o > 0 ? CELL_CHARS[o] : '-');
+  }).join('')).join(';');
+}
+function decodeBoard(data, players) {
+  const idxToId = {};
+  if (Array.isArray(players)) players.forEach((p, i) => { idxToId[i + 1] = p.id; });
+  return String(data).split(';').map(rStr => {
+    const row = [];
+    for (let i = 0; i + 1 < rStr.length; i += 3) {
+      const s = CELL_CHARS.indexOf(rStr[i]);
+      const a = CELL_CHARS.indexOf(rStr[i + 1]);
+      const oCh = rStr[i + 2];
+      const oIdx = oCh === '-' ? 0 : CELL_CHARS.indexOf(oCh);
+      row.push({
+        mine: !!(s & 1), revealed: !!(s & 2), flagged: !!(s & 4),
+        exploded: !!(s & 8), wrongFlag: !!(s & 16),
+        adj: a, owner: oIdx ? (idxToId[oIdx] || null) : null
+      });
+    }
+    return row;
+  });
+}
+function serializeBoard() { return encodeBoard(); }
+function serializeFullBoard() { return serializeBoard(); }
+function deserializeBoard(data) {
+  board = decodeBoard(data, mp.players);
+  minesPlaced = true;
+  // Update counts
+  flagCount = 0; revealedCount = 0;
+  for (let r = 0; r < board.length; r++)
+    for (let c = 0; c < board[0].length; c++) {
+      if (board[r][c].flagged) flagCount++;
+      if (board[r][c].revealed && !board[r][c].mine) revealedCount++;
+    }
+  updateMineCount();
+}
+
+// ============================================================
+//  Part 5.5: Chat / Leaderboard / Modals / Room List helpers
+// ============================================================
+
+let myName = '玩家';
+let unreadChat = 0;
+
+function esc(s) {
+  return String(s).replace(/[&<>"']/g, ch => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[ch]));
+}
+
+// Map a cell owner (host / client id / local) to a palette index.
+// Player order in mp.players is the same order used by renderStats, so the
+// colors always line up between the board tint and the stats bar.
+function ownerColor(owner) {
+  if (!owner) return '';
+  let idx = 0;
+  if (mp.connected && mp.players && mp.players.length) {
+    const i = mp.players.findIndex(p => p.id === owner);
+    if (i >= 0) idx = i;
+  }
+  return PLAYER_COLORS[idx % PLAYER_COLORS.length];
+}
+
+// Render the per-player sweep counts for the current round.
+// In a room: every participant (host + clients). Solo: just "me".
+// Each name carries a color swatch that matches the player's board tint.
+function renderStats() {
+  const bar = $('statsBar');
+  if (!bar) return;
+  const list = !mp.connected
+    ? [{ name: myName || '玩家', swept: localSwept, me: true }]
+    : mp.players.map(p => ({
+        name: p.name || '玩家',
+        swept: p.swept || 0,
+        me: mp.isHost ? p.id === 'host' : p.name === myName
+      }));
+  const sw = i => '<span style="display:inline-block;width:9px;height:9px;background:' +
+    PLAYER_COLORS[i % PLAYER_COLORS.length] +
+    ';border:1px solid #666;margin:0 3px 0 1px;vertical-align:-1px;"></span>';
+  const parts = list.map((p, i) => sw(i) + esc(p.name) + (p.me ? '(我)' : '') + ':' + p.swept);
+  bar.innerHTML = '当局扫雷: ' + parts.join(' · ');
+  bar.style.display = 'inline';
+}
+
+function addChatLine(name, msg, ts) {
+  const box = $('chatMsgs');
+  const line = document.createElement('div');
+  line.className = 'chat-line';
+  const t = new Date(ts || Date.now());
+  const hh = String(t.getHours()).padStart(2, '0');
+  const mm = String(t.getMinutes()).padStart(2, '0');
+  line.innerHTML = '<span class="time">' + hh + ':' + mm + '</span><span class="who">' + esc(name) + ':</span> ' + esc(msg);
+  box.appendChild(line);
+  box.scrollTop = box.scrollHeight;
+  bumpUnread();
+}
+
+function addSysChat(msg) {
+  const box = $('chatMsgs');
+  const line = document.createElement('div');
+  line.className = 'chat-line sys';
+  line.textContent = msg;
+  box.appendChild(line);
+  box.scrollTop = box.scrollHeight;
+  bumpUnread();
+}
+
+function bumpUnread() {
+  if ($('chatPanel').classList.contains('show')) return;
+  unreadChat++;
+  $('chatUnread').textContent = unreadChat > 99 ? '99+' : unreadChat;
+  $('chatUnread').classList.add('show');
+}
+
+function clearUnread() {
+  unreadChat = 0;
+  $('chatUnread').classList.remove('show');
+}
+
+function difficultyLabel() {
+  const v = $('difficulty').value;
+  return { easy: '初级', medium: '中级', hard: '高级', fullscreen: '满屏' }[v] || v;
+}
+
+function loadLocalLb() {
+  try { return JSON.parse(localStorage.getItem('ms_lb_local') || '[]'); } catch (e) { return []; }
+}
+
+function recordScore(name, time, diff) {
+  if (!name || time <= 0) return;
+  const list = loadLocalLb();
+  list.push({ name, time, diff, ts: Date.now() });
+  list.sort((a, b) => a.time - b.time);
+  try { localStorage.setItem('ms_lb_local', JSON.stringify(list.slice(0, 100))); } catch (e) {}
+  mp.publishScoreToNet(name, time, diff);
+}
+
+function fmtTime(s) {
+  s = Math.max(0, Math.floor(s || 0));
+  return Math.floor(s / 60) + ':' + String(s % 60).padStart(2, '0');
+}
+
+// ---- Modals ----
+function openModal(id) { $(id).classList.add('show'); }
+function closeModal(id) { $(id).classList.remove('show'); }
+
+// ---- Invite friends ----
+// Build a shareable link: <page>?room=<roomName>[&pass=<password>]
+// A friend who opens this URL in a browser is auto-joined into the room.
+function buildInviteLink() {
+  if (!mp.connected || !mp.isHost || !mp.roomCode) return '';
+  const base = location.href.split(/[?#]/)[0];
+  let link = base + '?room=' + encodeURIComponent(mp.roomCode);
+  if (mp.roomPass) link += '&pass=' + encodeURIComponent(mp.roomPass);
+  return link;
+}
+
+// Legacy fallback copy: hidden textarea + execCommand (works on file:// and
+// non-secure contexts where navigator.clipboard is unavailable).
+function fallbackCopy(text, cb) {
+  const ta = document.createElement('textarea');
+  ta.value = text;
+  ta.style.position = 'fixed';
+  ta.style.opacity = '0';
+  document.body.appendChild(ta);
+  ta.select();
+  let ok = false;
+  try { ok = document.execCommand('copy'); } catch (e) {}
+  document.body.removeChild(ta);
+  cb(ok);
+}
+
+function copyInvite() {
+  const link = buildInviteLink();
+  if (!link) { alertModal('提示', '请先创建房间'); return; }
+  const done = ok => {
+    const btn = $('inviteBtn');
+    if (ok) {
+      const old = btn.textContent;
+      btn.textContent = '已复制 ✓';
+      addSysChat('邀请链接已复制，发给好友即可加入');
+      setTimeout(() => { btn.textContent = old; }, 1500);
+      if (mp.roomPass) alertModal('邀请链接已复制', '链接包含房间密码，请只发给信任的好友。好友打开链接即可直接进入房间。');
+    } else {
+      alertModal('复制失败', '请手动复制链接：' + link);
+    }
+  };
+  if (navigator.clipboard && navigator.clipboard.writeText) {
+    navigator.clipboard.writeText(link).then(() => done(true)).catch(() => fallbackCopy(link, done));
+  } else {
+    fallbackCopy(link, done);
+  }
+}
+
+function alertModal(title, msg) {
+  const mask = document.createElement('div');
+  mask.className = 'modal-mask show';
+  mask.style.zIndex = '80';
+  mask.innerHTML = '<div class="modal-win" style="width:min(360px,92vw);">' +
+    '<div class="modal-titlebar"><span>' + esc(title) + '</span><div class="spacer"></div><span class="modal-close">✕</span></div>' +
+    '<div class="modal-body">' + esc(msg) + '</div>' +
+    '<div class="modal-btns"><button>确定</button></div></div>';
+  const close = () => { mask.remove(); };
+  mask.querySelector('.modal-close').addEventListener('click', close);
+  mask.querySelector('button').addEventListener('click', close);
+  mask.addEventListener('click', e => { if (e.target === mask) close(); });
+  document.body.appendChild(mask);
+}
+
+// ---- Room list ----
+async function refreshRoomList() {
+  const box = $('roomListBox');
+  $('roomListHint').textContent = '正在从大厅获取房间...';
+  const rooms = await mp.fetchRooms();
+  if (!rooms) {
+    box.innerHTML = '<div class="room-empty">无法连接大厅，请稍后重试，或手动输入房间号加入</div>';
+    $('roomListHint').textContent = '大厅暂不可用';
+    return;
+  }
+  const list = Object.values(rooms).sort((a, b) => b.ts - a.ts);
+  if (!list.length) {
+    box.innerHTML = '<div class="room-empty">暂无公开房间，点上方"创建房间"开一局吧</div>';
+    $('roomListHint').textContent = '共 0 个房间';
+    return;
+  }
+  $('roomListHint').textContent = '共 ' + list.length + ' 个公开房间';
+  box.innerHTML = '';
+  list.forEach(r => {
+    const item = document.createElement('div');
+    item.className = 'room-item';
+    const age = Math.max(1, Math.round((Date.now() - r.ts) / 1000));
+    item.innerHTML = '<span class="name" style="font-weight:bold;font-family:Courier New,monospace;min-width:64px;">' + esc(r.name || r.code) + '</span>' +
+      (r.pass ? '<span class="lock">🔒</span>' : '') +
+      '<span class="meta">' + (r.players || 1) + '人 · ' + age + 's前 · ' + esc(r.host || '?') + '</span>';
+    item.addEventListener('click', () => {
+      closeModal('roomListModal');
+      if (r.pass) {
+        mp.pendingJoin = { code: r.code, pass: '' };
+        $('passRoomCode').textContent = r.code;
+        $('joinRoomPass').value = '';
+        openModal('passModal');
+      } else {
+        mp.joinRoom(r.code, '');
+      }
+    });
+    box.appendChild(item);
+  });
+}
+
+// ---- Leaderboard ----
+async function refreshLeaderboard(which) {
+  const box = $('lbBox');
+  if (which === 'local') {
+    const list = loadLocalLb().slice(0, 20);
+    if (!list.length) { box.innerHTML = '<div class="room-empty">暂无记录，赢一局试试</div>'; $('lbHint').textContent = '胜利后自动记录成绩'; return; }
+    box.innerHTML = lbTable(list);
+    $('lbHint').textContent = '本机最快 ' + list.length + ' 条记录';
+  } else {
+    $('lbHint').textContent = '正在拉取全网成绩...';
+    box.innerHTML = '<div class="room-empty">加载中...</div>';
+    const net = await mp.fetchNetLb();
+    if (!net) {
+      box.innerHTML = '<div class="room-empty">无法连接排行榜服务</div>';
+      $('lbHint').textContent = '全网榜暂不可用';
+      return;
+    }
+    // aggregate: fastest per (name + diff)
+    const best = {};
+    net.forEach(s => {
+      if (!s.name || typeof s.time !== 'number') return;
+      const k = s.name + '|' + s.diff;
+      if (!best[k] || s.time < best[k].time) best[k] = { name: s.name, time: s.time, diff: s.diff };
+    });
+    const list = Object.values(best).sort((a, b) => a.time - b.time).slice(0, 20);
+    if (!list.length) { box.innerHTML = '<div class="room-empty">近12小时暂无成绩</div>'; $('lbHint').textContent = '全网榜(近12h)'; return; }
+    box.innerHTML = lbTable(list);
+    $('lbHint').textContent = '全网榜：近12小时各玩家最快成绩';
+  }
+}
+
+function lbTable(list) {
+  let html = '<table class="lb-table"><tr><th>#</th><th>玩家</th><th>用时</th><th>难度</th></tr>';
+  list.forEach((s, i) => {
+    const cls = i === 0 ? 'lb-rank1' : i === 1 ? 'lb-rank2' : i === 2 ? 'lb-rank3' : '';
+    html += '<tr><td class="' + cls + '">' + (i + 1) + '</td><td>' + esc(s.name) + '</td><td>' + fmtTime(s.time) + '</td><td>' + esc(s.diff) + '</td></tr>';
+  });
+  html += '</table>';
+  return html;
+}
+
+// ============================================================
+//  Part 6: Init & Wire Up
+// ============================================================
+
+// Reset game locally and sync with the room
+function resetGame() {
+  if (mp.connected && !mp.isHost) {
+    // Joined client: ask the host to start a new game (host controls difficulty)
+    mp.sendToHost({ t: 'newgame' });
+    return;
+  }
+  applyDifficulty();
+  if (mp.connected && mp.isHost) mp.sendBoard();
+}
+
+function sendChat() {
+  const input = $('chatInput');
+  const msg = input.value.trim();
+  if (!msg) return;
+  if (!mp.connected) { alertModal('提示', '未加入房间，无法聊天'); return; }
+  if (mp.isHost) {
+    addChatLine(myName, msg, Date.now());
+    mp.broadcast({ t: 'chat', name: myName, msg, ts: Date.now() });
+  } else {
+    mp.sendToHost({ t: 'chat', msg });
+  }
+  input.value = '';
+}
+
+function toggleChat(show) {
+  const p = $('chatPanel');
+  if (show === undefined) show = !p.classList.contains('show');
+  p.classList.toggle('show', show);
+  if (show) clearUnread();
+}
+
+function init() {
+  // Nickname
+  try { myName = localStorage.getItem('ms_nick') || '玩家'; } catch (e) {}
+  $('nickInput').value = myName;
+  $('nickInput').addEventListener('change', () => {
+    myName = ($('nickInput').value.trim() || '玩家').slice(0, 12);
+    $('nickInput').value = myName;
+    try { localStorage.setItem('ms_nick', myName); } catch (e) {}
+  });
+
+  mp.init();
+
+  // Difficulty change
+  $('difficulty').addEventListener('change', resetGame);
+
+  // New game
+  $('newGameBtn').addEventListener('click', resetGame);
+  $('colorModeBtn').addEventListener('click', () => {
+    colorMode = !colorMode;
+    $('colorModeBtn').classList.toggle('active', colorMode);
+    renderBoard();
+  });
+
+  // Smiley reset
+  smileyEl.addEventListener('click', resetGame);
+
+  // Fullscreen toggle
+  $('fullscreenBtn').addEventListener('click', () => {
+    if (document.fullscreenElement) document.exitFullscreen();
+    else document.documentElement.requestFullscreen();
+  });
+
+  // Multiplayer buttons
+  $('createRoomBtn').addEventListener('click', () => {
+    $('createRoomName').value = myName + '的房间';
+    $('createRoomPass').value = '';
+    openModal('createModal');
+    setTimeout(() => $('createRoomName').focus(), 50);
+  });
+  $('createRoomOk').addEventListener('click', () => {
+    const name = $('createRoomName').value.trim();
+    if (!name) { alertModal('提示', '请输入房间名'); return; }
+    const pass = $('createRoomPass').value.trim();
+    closeModal('createModal');
+    mp.createRoom(name, pass);
+  });
+  $('createRoomName').addEventListener('keydown', e => {
+    if (e.key === 'Enter') $('createRoomOk').click();
+  });
+  $('joinRoomBtn').addEventListener('click', () => {
+    const code = $('joinInput').value.trim();
+    if (code) mp.joinRoom(code, '');
+  });
+  $('passOk').addEventListener('click', () => {
+    const code = ($('passRoomCode').textContent || '').trim();
+    const pass = $('joinRoomPass').value.trim();
+    closeModal('passModal');
+    if (code) mp.joinRoom(code, pass);
+  });
+  $('leaveRoomBtn').addEventListener('click', () => mp.leaveRoom());
+  $('inviteBtn').addEventListener('click', copyInvite);
+  $('joinInput').addEventListener('keydown', e => {
+    if (e.key === 'Enter') $('joinRoomBtn').click();
+  });
+  $('joinRoomPass').addEventListener('keydown', e => {
+    if (e.key === 'Enter') $('passOk').click();
+  });
+
+  // Room list
+  $('roomListBtn').addEventListener('click', () => {
+    openModal('roomListModal');
+    refreshRoomList();
+  });
+  $('refreshRoomsBtn').addEventListener('click', refreshRoomList);
+
+  // Leaderboard
+  let lbTab = 'local';
+  $('leaderboardBtn').addEventListener('click', () => {
+    openModal('lbModal');
+    refreshLeaderboard(lbTab);
+  });
+  $('lbTabLocal').addEventListener('click', () => {
+    lbTab = 'local';
+    $('lbTabLocal').classList.add('active');
+    $('lbTabNet').classList.remove('active');
+    refreshLeaderboard('local');
+  });
+  $('lbTabNet').addEventListener('click', () => {
+    lbTab = 'net';
+    $('lbTabNet').classList.add('active');
+    $('lbTabLocal').classList.remove('active');
+    refreshLeaderboard('net');
+  });
+
+  // Chat
+  $('chatToggleBtn').addEventListener('click', () => toggleChat());
+  $('chatCloseBtn').addEventListener('click', () => toggleChat(false));
+  $('chatSendBtn').addEventListener('click', sendChat);
+  $('chatInput').addEventListener('keydown', e => {
+    if (e.key === 'Enter') sendChat();
+  });
+
+  // Modal close buttons (static modals)
+  document.querySelectorAll('.modal-close').forEach(el => {
+    el.addEventListener('click', () => {
+      const win = el.closest('.modal-mask');
+      if (win) win.classList.remove('show');
+    });
+  });
+  document.querySelectorAll('[data-close]').forEach(el => {
+    el.addEventListener('click', () => closeModal(el.dataset.close));
+  });
+  document.querySelectorAll('.modal-mask').forEach(mask => {
+    mask.addEventListener('click', e => { if (e.target === mask) mask.classList.remove('show'); });
+  });
+
+  // Resize handler for fullscreen mode
+  let resizeTimer = null;
+  window.addEventListener('resize', () => {
+    if (isFullscreen) {
+      clearTimeout(resizeTimer);
+      resizeTimer = setTimeout(() => {
+        if (isFullscreen) {
+          if (!mp.connected || mp.isHost) calcFullscreen();
+          else fitCellSize(); // joined client: keep host rows/cols, adapt size
+        }
+      }, 300);
+    }
+  });
+
+  // Prevent context menu on minefield
+  minefieldEl.addEventListener('contextmenu', e => e.preventDefault());
+
+  // Hidden feature: key sequence listener
+  window.addEventListener('keydown', handleGlobalKeydown);
+
+  // Start with easy difficulty
+  applyDifficulty();
+
+  // Auto-join from invite link: page?room=<name>[&pass=<pwd>]
+  // Friend opens the shared link -> joins the host's room automatically.
+  try {
+    const qs = new URLSearchParams(location.search);
+    const inviteRoom = (qs.get('room') || qs.get('code') || '').trim();
+    const invitePass = qs.get('pass') || '';
+    if (inviteRoom) {
+      $('joinInput').value = inviteRoom;
+      mp.updateStatus('检测到邀请链接，正在加入房间「' + inviteRoom + '」...');
+      mp.joinRoom(inviteRoom, invitePass);
+    }
+  } catch (e) { console.error('invite link parse failed:', e); }
+}
+
+// Start when DOM ready
+if (document.readyState === 'loading') document.addEventListener('DOMContentLoaded', init);
+else init();
+</script>
+</body>
+</html>
