@@ -83,6 +83,28 @@ body {
   flex: 1; display: flex; align-items: center; justify-content: center;
   overflow: auto; padding: 8px; position: relative;
 }
+/* ---- Game window drag bar (visible only in floating mode) ---- */
+#gameDragBar {
+  display: none; align-items: center; gap: 6px;
+  padding: 4px 8px; margin-bottom: 6px;
+  background: #000080; color: #fff; font-weight: bold; font-size: 12px;
+  border: 2px solid; border-color: #fff #808080 #808080 #fff;
+  cursor: move; user-select: none; -webkit-user-select: none; touch-action: none;
+}
+#gameDragBar .spacer { flex: 1; }
+body.game-float #gameDragBar { display: flex; }
+/* Floating mode: game becomes a draggable window sized to its content.
+   The wrapper is just a transparent positioning layer; #gameArea (with its
+   own background/border) is the actual window face — no double frame. */
+body.game-float #gameWrap {
+  position: fixed; z-index: 45;
+  width: max-content; max-width: 94vw; max-height: 86vh;
+  padding: 0; background: transparent; border: none; box-shadow: none;
+  overflow: auto;
+  align-items: flex-start; justify-content: flex-start;
+}
+/* #gameArea is the window face; shadow handled after the dark-theme block
+   (see below) so specificity order stays correct. */
 #gameArea {
   display: inline-block; background: #c0c0c0;
   padding: 6px; border: 3px solid;
@@ -266,8 +288,44 @@ body {
 #chatPanel .titlebar {
   display: flex; align-items: center; padding: 4px 8px;
   background: #000080; color: #fff; font-weight: bold; font-size: 12px; gap: 6px;
+  cursor: move; user-select: none; -webkit-user-select: none; touch-action: none;
 }
 #chatPanel .titlebar .spacer { flex: 1; }
+/* Pin-to-right toggle button on the chat titlebar */
+.pin-btn {
+  width: 20px; height: 20px; line-height: 18px; text-align: center;
+  background: #c0c0c0; color: #000; cursor: pointer; font-size: 12px;
+  border: 2px solid; border-color: #fff #808080 #808080 #fff;
+}
+.pin-btn:active { border-color: #808080 #fff #fff #808080; }
+.pin-btn.active {
+  background: #000080; color: #fff;
+  border-color: #808080 #fff #fff #808080;
+}
+/* ---- Docked mode: chat fills the whole right column, game area yields ---- */
+/* body.chat-docked is set by JS only when pinned AND chat is visible. */
+body.chat-docked #chatPanel {
+  position: fixed; right: 0; bottom: 0;
+  width: min(320px, 100vw);
+  height: auto;
+  display: flex;
+  border-radius: 0;
+  border-width: 1px;
+  border-color: #808080;
+  box-shadow: -8px 0 28px rgba(0,0,0,0.35);
+}
+body.chat-docked #chatPanel .titlebar {
+  cursor: default;
+  border-radius: 0;
+}
+body.chat-docked #chatMsgs { flex: 1; min-height: 0; }
+body.chat-docked #gameWrap { padding-right: min(320px, 100vw); }
+body.chat-docked #gameArea { margin-left: auto; margin-right: auto; }
+/* Narrow screens: docked sidebar takes most of the width, keep game visible */
+@media (max-width: 720px) {
+  body.chat-docked #chatPanel { width: min(300px, 88vw); }
+  body.chat-docked #gameWrap { padding-right: min(300px, 88vw); }
+}
 #chatMsgs {
   flex: 1; overflow-y: auto; padding: 6px 8px; font-size: 12px;
   background: #fdfdfd; border: 2px solid;
@@ -372,6 +430,15 @@ body[data-theme="dark"] #gameArea {
   background: #111923; border: 1px solid #263340; border-radius: 16px;
   box-shadow: 0 18px 45px #0005;
 }
+/* Window face shadow (placed after the dark block to win the cascade). */
+body.game-float #gameArea { box-shadow: 4px 4px 14px rgba(0,0,0,0.35); }
+/* Game window (dark): the transparent wrapper lets #gameArea act as the
+   window face. */
+body[data-theme="dark"] #gameDragBar {
+  background: #0c1118; color: #6ee7b7;
+  border: 1px solid #1f2d3a; border-radius: 10px 10px 0 0;
+}
+body[data-theme="dark"] #gameDragBar + #header { margin-top: 6px; }
 
 /* ---- Header (mine count / smiley / timer) ---- */
 body[data-theme="dark"] #header {
@@ -486,6 +553,23 @@ body[data-theme="dark"] #chatPanel .titlebar {
   background: #0c1118; color: #6ee7b7; border-bottom: 1px solid #1f2d3a;
   border-radius: 14px 14px 0 0;
 }
+body[data-theme="dark"] .pin-btn {
+  background: #1d2935; color: #9cabb9;
+  border: 1px solid #283544; border-radius: 6px;
+}
+body[data-theme="dark"] .pin-btn:hover { background: #243341; color: #dce6ef; }
+body[data-theme="dark"] .pin-btn.active { background: #6ee7b7; color: #0b1a16; border-color: #6ee7b7; }
+/* Docked mode (dark): flat full-height right column */
+body.chat-docked[data-theme="dark"] #chatPanel {
+  border-radius: 0;
+  border: 1px solid #1f2d3a;
+  border-width: 1px 0 0 1px;
+  box-shadow: -8px 0 28px rgba(0,0,0,0.5);
+}
+body.chat-docked[data-theme="dark"] #chatPanel .titlebar {
+  border-radius: 0;
+  border-bottom: 1px solid #1f2d3a;
+}
 body[data-theme="dark"] #chatMsgs {
   background: #0a1018; border: 1px solid #1f2d3a; border-radius: 8px; color: #dce6ef;
 }
@@ -538,6 +622,7 @@ body[data-theme="dark"] #cheatToast {
   <button id="newGameBtn">新游戏</button>
   <button id="colorModeBtn" title="按玩家显示不同的扫雷颜色，再次点击恢复默认">分色</button>
   <button id="themeBtn" title="切换深色/复古风格">🌙 深色</button>
+  <button id="gameWindowBtn" title="切换游戏界面 嵌入/悬浮 窗口">🪟 窗口</button>
   <button id="roomListBtn" title="查看公开房间列表">房间列表</button>
   <button id="leaderboardBtn" title="查看排行榜">排行榜</button>
   <button id="chatToggleBtn" title="聊天">聊天<span id="chatUnread"></span></button>
@@ -562,6 +647,12 @@ body[data-theme="dark"] #cheatToast {
 <!-- Game Area -->
 <div id="gameWrap">
   <div id="gameArea">
+    <div id="gameDragBar">
+      <span>扫雷</span>
+      <div class="spacer"></div>
+      <span id="gameRoomLabel" style="font-weight:normal;font-size:11px;">未连接</span>
+      <span class="modal-close" id="gameCloseBtn" title="退出悬浮">✕</span>
+    </div>
     <div id="header">
       <div class="digit-display" id="mineCount">010</div>
       <button id="smiley">&#128578;</button>
@@ -575,10 +666,11 @@ body[data-theme="dark"] #cheatToast {
 
 <!-- Chat Panel -->
 <div id="chatPanel">
-  <div class="titlebar">
+  <div class="titlebar" id="chatTitlebar">
     <span>房间聊天</span>
     <div class="spacer"></div>
     <span id="chatRoomLabel" style="font-weight:normal;font-size:11px;">未连接</span>
+    <span class="pin-btn" id="chatPinBtn" title="固定在右侧">📌</span>
     <span class="modal-close" id="chatCloseBtn">✕</span>
   </div>
   <div id="chatMsgs"></div>
@@ -2258,6 +2350,205 @@ function toggleChat(show) {
   if (show === undefined) show = !p.classList.contains('show');
   p.classList.toggle('show', show);
   if (show) clearUnread();
+  updateChatDocked();
+}
+
+// ---- Chat window: draggable float + dock-to-right (full-height sidebar) ----
+let chatPinned = false;   // true = docked as right full-height sidebar
+let chatPos = null;       // {x, y} saved floating position
+let chatDrag = null;      // active drag state
+
+function saveChatState() {
+  try { localStorage.setItem('msw-chat', JSON.stringify({ pinned: chatPinned, pos: chatPos })); } catch (e) {}
+}
+
+// body.chat-docked only while docked AND chat visible, so the game area
+// yields space only when the sidebar is actually on screen.
+function updateChatDocked() {
+  const docked = chatPinned && $('chatPanel').classList.contains('show');
+  document.body.classList.toggle('chat-docked', docked);
+}
+
+function applyChatPinned() {
+  const p = $('chatPanel');
+  $('chatPinBtn').classList.toggle('active', chatPinned);
+  $('chatPinBtn').title = chatPinned ? '恢复悬浮' : '固定在右侧';
+  if (chatPinned) {
+    // Remember where it was floating (only when actually floating & visible)
+    if (!document.body.classList.contains('chat-docked') && p.offsetWidth) {
+      const r = p.getBoundingClientRect();
+      chatPos = { x: r.left, y: r.top };
+    }
+    p.style.left = ''; p.style.top = ''; p.style.right = ''; p.style.bottom = '';
+    // Dock below the toolbar rows so they stay clickable
+    const bar = $('mpPanel');
+    const top = (bar && bar.getBoundingClientRect && bar.getBoundingClientRect().bottom) || 62;
+    p.style.top = top + 'px';
+  } else {
+    // Back to floating: keep current on-screen position
+    if (p.offsetWidth) {
+      const r = p.getBoundingClientRect();
+      chatPos = { x: r.left, y: r.top };
+    }
+    p.style.right = ''; p.style.bottom = '';
+    if (chatPos) { p.style.left = chatPos.x + 'px'; p.style.top = chatPos.y + 'px'; }
+  }
+  updateChatDocked();
+  saveChatState();
+}
+
+// Pin toggle (exposed as a named function so tests can drive it directly)
+function toggleChatPinned() {
+  chatPinned = !chatPinned;
+  applyChatPinned();
+}
+
+function setupChatWindow() {
+  const bar = $('chatTitlebar');
+  const pin = $('chatPinBtn');
+
+  // Restore saved state
+  try {
+    const saved = JSON.parse(localStorage.getItem('msw-chat') || 'null');
+    if (saved) {
+      chatPinned = !!saved.pinned;
+      chatPos = saved.pos || null;
+      const p = $('chatPanel');
+      if (!chatPinned && chatPos) {
+        p.style.left = chatPos.x + 'px'; p.style.top = chatPos.y + 'px';
+        p.style.right = ''; p.style.bottom = '';
+      } else if (chatPinned) {
+        p.style.left = ''; p.style.right = '';
+        const mp = $('mpPanel');
+        const top = (mp && mp.getBoundingClientRect && mp.getBoundingClientRect().bottom) || 62;
+        p.style.top = top + 'px'; p.style.bottom = '';
+      }
+      pin.classList.toggle('active', chatPinned);
+      pin.title = chatPinned ? '恢复悬浮' : '固定在右侧';
+      updateChatDocked();
+    }
+  } catch (e) {}
+
+  // Pin toggle
+  pin.addEventListener('click', (e) => {
+    e.stopPropagation();
+    toggleChatPinned();
+  });
+
+  // Dragging (only while floating)
+  bar.addEventListener('pointerdown', (e) => {
+    if (chatPinned) return;
+    if (e.target.closest('button, .pin-btn, .modal-close, input, textarea')) return;
+    const p = $('chatPanel');
+    const r = p.getBoundingClientRect();
+    if (!chatPos) {
+      chatPos = { x: r.left, y: r.top };
+      p.style.left = r.left + 'px'; p.style.top = r.top + 'px';
+      p.style.right = ''; p.style.bottom = '';
+    }
+    chatDrag = { sx: e.clientX, sy: e.clientY, ox: chatPos.x, oy: chatPos.y };
+    e.preventDefault();
+    try { bar.setPointerCapture(e.pointerId); } catch (err) {}
+  });
+  bar.addEventListener('pointermove', (e) => {
+    if (!chatDrag) return;
+    const p = $('chatPanel');
+    const w = p.offsetWidth || 300, h = p.offsetHeight || 260;
+    const nx = Math.max(0, Math.min(chatDrag.ox + (e.clientX - chatDrag.sx), window.innerWidth - w));
+    const ny = Math.max(0, Math.min(chatDrag.oy + (e.clientY - chatDrag.sy), window.innerHeight - 26));
+    chatPos = { x: nx, y: ny };
+    p.style.left = nx + 'px'; p.style.top = ny + 'px';
+  });
+  const endDrag = (e) => {
+    if (!chatDrag) return;
+    chatDrag = null;
+    try { bar.releasePointerCapture(e.pointerId); } catch (err) {}
+    saveChatState();
+  };
+  bar.addEventListener('pointerup', endDrag);
+  bar.addEventListener('pointercancel', endDrag);
+}
+
+// ---- Game window: draggable floating window ----
+let gameFloating = false;  // true = game area is a separate floating window
+let gamePos = null;        // {x, y} saved floating position
+let gameDrag = null;       // active drag state
+
+function saveGameState() {
+  try { localStorage.setItem('msw-game', JSON.stringify({ f: gameFloating, p: gamePos })); } catch (e) {}
+}
+
+function updateGameWindow() {
+  document.body.classList.toggle('game-float', gameFloating);
+}
+
+function applyGameWindow() {
+  const w = $('gameWrap');
+  if (gameFloating) {
+    // Floating: restore/keep a free position
+    if (!gamePos) {
+      const r = w.getBoundingClientRect();
+      gamePos = { x: r.left, y: r.top };
+    }
+    w.style.left = gamePos.x + 'px'; w.style.top = gamePos.y + 'px';
+    w.style.right = ''; w.style.bottom = '';
+  } else {
+    // Embedded: clear all inline positioning
+    w.style.left = ''; w.style.top = ''; w.style.right = ''; w.style.bottom = '';
+  }
+  updateGameWindow();
+  saveGameState();
+}
+
+function toggleGameWindow() {
+  gameFloating = !gameFloating;
+  applyGameWindow();
+}
+
+function setupGameWindow() {
+  // Restore saved state
+  try {
+    const saved = JSON.parse(localStorage.getItem('msw-game') || 'null');
+    if (saved) {
+      gameFloating = !!saved.f;
+      gamePos = saved.p || null;
+      if (gameFloating && gamePos) {
+        const w = $('gameWrap');
+        w.style.left = gamePos.x + 'px'; w.style.top = gamePos.y + 'px';
+      }
+      updateGameWindow();
+    }
+  } catch (e) {}
+
+  const dragBar = $('gameDragBar');
+  // Drag (only while floating)
+  dragBar.addEventListener('pointerdown', (e) => {
+    if (!gameFloating) return;
+    if (e.target.closest('button, .pin-btn, .modal-close')) return;
+    const w = $('gameWrap');
+    const r = w.getBoundingClientRect();
+    if (!gamePos) { gamePos = { x: r.left, y: r.top }; }
+    gameDrag = { sx: e.clientX, sy: e.clientY, ox: gamePos.x, oy: gamePos.y };
+    e.preventDefault();
+    try { dragBar.setPointerCapture(e.pointerId); } catch (err) {}
+  });
+  dragBar.addEventListener('pointermove', (e) => {
+    if (!gameDrag) return;
+    const w = $('gameWrap');
+    const cw = w.offsetWidth || 680, ch = w.offsetHeight || 400;
+    const nx = Math.max(0, Math.min(gameDrag.ox + (e.clientX - gameDrag.sx), window.innerWidth - Math.min(cw, 120)));
+    const ny = Math.max(0, Math.min(gameDrag.oy + (e.clientY - gameDrag.sy), window.innerHeight - 30));
+    gamePos = { x: nx, y: ny };
+    w.style.left = nx + 'px'; w.style.top = ny + 'px';
+  });
+  const endGameDrag = (e) => {
+    if (!gameDrag) return;
+    gameDrag = null;
+    try { dragBar.releasePointerCapture(e.pointerId); } catch (err) {}
+    saveGameState();
+  };
+  dragBar.addEventListener('pointerup', endGameDrag);
+  dragBar.addEventListener('pointercancel', endGameDrag);
 }
 
 function init() {
@@ -2377,10 +2668,16 @@ function init() {
   // Chat
   $('chatToggleBtn').addEventListener('click', () => toggleChat());
   $('chatCloseBtn').addEventListener('click', () => toggleChat(false));
+  setupChatWindow();
   $('chatSendBtn').addEventListener('click', sendChat);
   $('chatInput').addEventListener('keydown', e => {
     if (e.key === 'Enter') sendChat();
   });
+
+  // Game window (float)
+  $('gameWindowBtn').addEventListener('click', toggleGameWindow);
+  $('gameCloseBtn').addEventListener('click', (e) => { e.stopPropagation(); if (gameFloating) toggleGameWindow(); });
+  setupGameWindow();
 
   // Modal close buttons (static modals)
   document.querySelectorAll('.modal-close').forEach(el => {
