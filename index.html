@@ -316,6 +316,212 @@ body {
   .cell { width: 18px; height: 18px; font-size: 12px; }
   #menuBar select, #menuBar button, #mpPanel button, #mpPanel input { font-size: 11px; }
 }
+/* ===================================================================
+   DARK THEME — "并肩排雷" modern dark style
+   Activated via body[data-theme="dark"]. All default (retro Win98)
+   styles are overridden here. Toggle button: #themeBtn in menuBar.
+   =================================================================== */
+body[data-theme="dark"] {
+  background: radial-gradient(circle at 15% 15%, #1a3040 0, transparent 32%), #0c1118;
+  font-family: Inter, "Microsoft YaHei", "Segoe UI", sans-serif;
+  color: #e8edf4;
+}
+
+/* ---- Menu Bar ---- */
+body[data-theme="dark"] #menuBar {
+  background: #0c1118;
+  border-bottom: 1px solid #1f2d3a;
+}
+body[data-theme="dark"] #menuBar label { color: #9cabb9; }
+body[data-theme="dark"] #menuBar select,
+body[data-theme="dark"] #menuBar button {
+  background: #151d27; color: #dce6ef;
+  border: 1px solid #283544; border-radius: 8px;
+  font-weight: 600;
+}
+body[data-theme="dark"] #menuBar select:hover,
+body[data-theme="dark"] #menuBar button:hover { background: #1d2935; border-color: #3a4d63; }
+body[data-theme="dark"] #menuBar select:disabled { color: #4a5a6b; }
+body[data-theme="dark"] #menuBar select:active,
+body[data-theme="dark"] #menuBar button:active { border-color: #3a4d63; }
+body[data-theme="dark"] #menuBar button.active { background: #6ee7b7; color: #0b1a16; border-color: #6ee7b7; }
+
+/* ---- Multiplayer Panel ---- */
+body[data-theme="dark"] #mpPanel {
+  background: #0c1118; border-bottom: 1px solid #1f2d3a;
+}
+body[data-theme="dark"] #mpPanel input {
+  background: #151d27; border: 1px solid #283544; color: #fff; border-radius: 8px;
+}
+body[data-theme="dark"] #mpPanel input:focus { border-color: #6ee7b7; }
+body[data-theme="dark"] #mpPanel button {
+  background: #6ee7b7; color: #0b1a16; border: none; border-radius: 8px; font-weight: 700;
+}
+body[data-theme="dark"] #mpPanel button:hover { background: #5fd0a8; }
+body[data-theme="dark"] #mpPanel button:disabled { background: #25313d; color: #4a5a6b; }
+body[data-theme="dark"] #mpPanel .status { color: #6f8296; }
+body[data-theme="dark"] #roomCode { color: #6ee7b7; }
+body[data-theme="dark"] #onlineCount { color: #6ee7b7; }
+body[data-theme="dark"] #statsBar {
+  background: #151d27; border: 1px solid #283544; color: #9cabb9; border-radius: 8px;
+}
+
+/* ---- Game Container ---- */
+body[data-theme="dark"] #gameWrap { background: #0c1118; }
+body[data-theme="dark"] #gameArea {
+  background: #111923; border: 1px solid #263340; border-radius: 16px;
+  box-shadow: 0 18px 45px #0005;
+}
+
+/* ---- Header (mine count / smiley / timer) ---- */
+body[data-theme="dark"] #header {
+  border: 1px solid #263340; border-radius: 12px; background: #131b24;
+}
+body[data-theme="dark"] .digit-display {
+  font-family: 'Courier New', monospace; font-weight: bold;
+  color: #6ee7b7; background: #0a1018; border: 1px solid #1f2d3a; border-radius: 6px;
+}
+body[data-theme="dark"] #smiley {
+  background: #6ee7b7; border: none; border-radius: 10px; font-size: 20px;
+  box-shadow: 0 2px 8px rgba(110,231,183,0.3);
+}
+body[data-theme="dark"] #smiley:hover { background: #5fd0a8; }
+
+/* ---- Minefield Grid ---- */
+body[data-theme="dark"] #minefield {
+  border: 1px solid #263340; border-radius: 8px; overflow: hidden;
+}
+body[data-theme="dark"] .cell {
+  background: #1b2632; border: 1px solid #1f2d3a; border-radius: 3px;
+  transition: background 0.1s;
+}
+body[data-theme="dark"] .cell:hover { background: #243341; }
+body[data-theme="dark"] .cell.revealed { background: #131b24; border-color: #1f2d3a; }
+body[data-theme="dark"] .cell.revealed:hover { background: #131b24; }
+body[data-theme="dark"] .cell.flag::before { color: #6ee7b7; }
+body[data-theme="dark"] .cell.mine { background: #ef6461; }
+body[data-theme="dark"] .cell.mine::before { color: #fff; }
+body[data-theme="dark"] .cell.mine.exploded { background: #fbbf24; }
+body[data-theme="dark"] .cell.mine.exploded::before { color: #0b1a16; }
+body[data-theme="dark"] .cell.wrong-flag::before { color: #ef6461; }
+body[data-theme="dark"] .cell.flash { background-color: #fbbf24 !important; color: #0b1a16; }
+body[data-theme="dark"] .cell.pending {
+  animation: pendingPulseDark .45s ease-in-out infinite alternate;
+}
+@keyframes pendingPulseDark {
+  from { filter: brightness(1.0); box-shadow: inset 0 0 0 2px #283544; }
+  to   { filter: brightness(1.6); box-shadow: inset 0 0 6px 3px #6ee7b7; }
+}
+body[data-theme="dark"] .cell.num1 { color: #6ee7b7; }
+body[data-theme="dark"] .cell.num2 { color: #60a5fa; }
+body[data-theme="dark"] .cell.num3 { color: #fb7185; }
+body[data-theme="dark"] .cell.num4 { color: #fbbf24; }
+body[data-theme="dark"] .cell.num5 { color: #a78bfa; }
+body[data-theme="dark"] .cell.num6 { color: #22d3ee; }
+body[data-theme="dark"] .cell.num7 { color: #f8fafc; }
+body[data-theme="dark"] .cell.num8 { color: #94a3b8; }
+body[data-theme="dark"] .cell.cheat-mine::after { background: #ef6461; }
+body[data-theme="dark"] .cell.cheat-safe::after { background: #6ee7b7; }
+
+/* ---- Game Over Overlay ---- */
+body[data-theme="dark"] #overlay { background: rgba(12,17,24,0.8); }
+body[data-theme="dark"] #overlay .msg {
+  background: #131b24; border: 2px solid #263340; border-radius: 16px;
+  color: #e8edf4; box-shadow: 0 12px 40px #0008;
+}
+body[data-theme="dark"] #overlay .msg.win { color: #6ee7b7; border-color: #6ee7b7; }
+body[data-theme="dark"] #overlay .msg.lose { color: #ef6461; border-color: #ef6461; }
+
+/* ---- Modal ---- */
+body[data-theme="dark"] .modal-mask { background: rgba(0,0,0,0.6); }
+body[data-theme="dark"] .modal-win {
+  background: #131b24; border: 1px solid #263340; border-radius: 16px;
+  box-shadow: 0 20px 60px #000a; color: #e8edf4;
+}
+body[data-theme="dark"] .modal-titlebar {
+  background: #0c1118; color: #6ee7b7; border-bottom: 1px solid #1f2d3a;
+  border-radius: 16px 16px 0 0;
+}
+body[data-theme="dark"] .modal-close {
+  background: #1d2935; color: #9cabb9; border: 1px solid #283544; border-radius: 6px;
+}
+body[data-theme="dark"] .modal-close:hover { background: #ef6461; color: #fff; }
+body[data-theme="dark"] .modal-body { background: #131b24; }
+body[data-theme="dark"] .modal-body label { color: #9cabb9; }
+body[data-theme="dark"] .modal-body input[type=text],
+body[data-theme="dark"] .modal-body input[type=password] {
+  background: #0a1018; border: 1px solid #283544; color: #fff; border-radius: 8px;
+}
+body[data-theme="dark"] .modal-body input:focus { border-color: #6ee7b7; }
+body[data-theme="dark"] .modal-btns button,
+body[data-theme="dark"] .modal-body button {
+  background: #6ee7b7; color: #0b1a16; border: none; border-radius: 8px; font-weight: 700;
+}
+body[data-theme="dark"] .modal-btns button:hover,
+body[data-theme="dark"] .modal-body button:hover { background: #5fd0a8; }
+body[data-theme="dark"] .modal-hint { color: #6f8296; }
+body[data-theme="dark"] .modal-tabs button {
+  background: #151d27; border: 1px solid #283544; color: #9cabb9; border-radius: 8px;
+}
+body[data-theme="dark"] .modal-tabs button.active {
+  background: #6ee7b7; color: #0b1a16; border-color: #6ee7b7;
+}
+
+/* ---- Room list ---- */
+body[data-theme="dark"] .room-item {
+  background: #18232e; border: 1px solid #293846; border-radius: 12px;
+}
+body[data-theme="dark"] .room-item:hover { background: #1d2935; border-color: #3a4d63; }
+body[data-theme="dark"] .room-item .code { color: #6ee7b7; }
+body[data-theme="dark"] .room-item .meta { color: #8293a4; }
+body[data-theme="dark"] .room-item .lock { color: #ef6461; }
+body[data-theme="dark"] .room-empty { color: #718295; }
+
+/* ---- Chat panel ---- */
+body[data-theme="dark"] #chatPanel {
+  background: #131b24; border: 1px solid #263340; border-radius: 14px;
+  box-shadow: 0 12px 40px #0008;
+}
+body[data-theme="dark"] #chatPanel .titlebar {
+  background: #0c1118; color: #6ee7b7; border-bottom: 1px solid #1f2d3a;
+  border-radius: 14px 14px 0 0;
+}
+body[data-theme="dark"] #chatMsgs {
+  background: #0a1018; border: 1px solid #1f2d3a; border-radius: 8px; color: #dce6ef;
+}
+body[data-theme="dark"] .chat-line .time { color: #4a5a6b; }
+body[data-theme="dark"] .chat-line.sys { color: #6f8296; }
+body[data-theme="dark"] #chatInputRow input {
+  background: #151d27; border: 1px solid #283544; color: #fff; border-radius: 8px;
+}
+body[data-theme="dark"] #chatInputRow input:focus { border-color: #6ee7b7; }
+body[data-theme="dark"] #chatInputRow button {
+  background: #6ee7b7; color: #0b1a16; border: none; border-radius: 8px; font-weight: 700;
+}
+body[data-theme="dark"] #chatUnread { background: #ef6461; }
+
+/* ---- Leaderboard ---- */
+body[data-theme="dark"] .lb-table th,
+body[data-theme="dark"] .lb-table td { border: 1px solid #283544; }
+body[data-theme="dark"] .lb-table th { background: #151d27; color: #6ee7b7; }
+body[data-theme="dark"] .lb-table tr:nth-child(even) td { background: #0f1620; }
+body[data-theme="dark"] .lb-table tr:nth-child(odd) td { background: #131b24; }
+body[data-theme="dark"] .lb-rank1 { color: #fbbf24; }
+body[data-theme="dark"] .lb-rank2 { color: #94a3b8; }
+body[data-theme="dark"] .lb-rank3 { color: #fb7185; }
+
+/* ---- Cheat toast ---- */
+body[data-theme="dark"] #cheatToast {
+  background: rgba(19,27,36,0.92); color: #6ee7b7; border: 1px solid #263340; border-radius: 8px;
+}
+
+/* ---- Responsive ---- */
+@media (max-width: 600px) {
+  body[data-theme="dark"] .cell { width: 22px; height: 22px; font-size: 14px; }
+}
+@media (max-width: 400px) {
+  body[data-theme="dark"] .cell { width: 18px; height: 18px; font-size: 12px; }
+}
 </style>
 </head>
 <body>
@@ -331,6 +537,7 @@ body {
   </select>
   <button id="newGameBtn">新游戏</button>
   <button id="colorModeBtn" title="按玩家显示不同的扫雷颜色，再次点击恢复默认">分色</button>
+  <button id="themeBtn" title="切换深色/复古风格">🌙 深色</button>
   <button id="roomListBtn" title="查看公开房间列表">房间列表</button>
   <button id="leaderboardBtn" title="查看排行榜">排行榜</button>
   <button id="chatToggleBtn" title="聊天">聊天<span id="chatUnread"></span></button>
@@ -2074,6 +2281,26 @@ function init() {
     colorMode = !colorMode;
     $('colorModeBtn').classList.toggle('active', colorMode);
     renderBoard();
+  });
+
+  // Theme toggle (retro Win98 ↔ dark modern)
+  const themeBtn = $('themeBtn');
+  function applyTheme(theme) {
+    if (theme === 'dark') {
+      document.body.setAttribute('data-theme', 'dark');
+      themeBtn.textContent = '\u{1F576} 复古';
+    } else {
+      document.body.removeAttribute('data-theme');
+      themeBtn.textContent = '\u{1F319} 深色';
+    }
+    try { localStorage.setItem('msw-theme', theme); } catch (e) {}
+  }
+  let savedTheme = 'retro';
+  try { savedTheme = localStorage.getItem('msw-theme') || 'retro'; } catch (e) {}
+  applyTheme(savedTheme);
+  themeBtn.addEventListener('click', () => {
+    const cur = document.body.getAttribute('data-theme') === 'dark' ? 'dark' : 'retro';
+    applyTheme(cur === 'dark' ? 'retro' : 'dark');
   });
 
   // Smiley reset
